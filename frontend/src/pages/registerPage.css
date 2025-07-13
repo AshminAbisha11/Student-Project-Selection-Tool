@@ -1,0 +1,47 @@
+.register-container {
+    display: flex;
+    justify-content: space-between;
+    padding: 40px;
+    font-family: Arial, sans-serif;
+  }
+  
+  .register-form {
+    width: 50%;
+    padding-right: 20px;
+  }
+  
+  .register-form h2 {
+    margin-bottom: 20px;
+  }
+  
+  .register-form form input,
+  .register-form form select {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+  }
+  
+  .register-form form button {
+    padding: 10px 20px;
+    background-color: #f1c40f;
+    border: none;
+    cursor: pointer;
+  }
+  
+  .register-side {
+    width: 40%;
+    background-color: #fafafa;
+    padding: 30px;
+    border-left: 1px solid #ddd;
+    text-align: center;
+  }
+  
+  .signin-btn {
+    margin-top: 10px;
+    padding: 10px 20px;
+    background-color: #eee;
+    border: none;
+    cursor: pointer;
+  }
+  

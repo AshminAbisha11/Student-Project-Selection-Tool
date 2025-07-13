@@ -83,7 +83,7 @@ exports.registerUser = async (req, res) => {
     }
 
     //Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password,8);
 
     // Insert user into database
     await db.query(
