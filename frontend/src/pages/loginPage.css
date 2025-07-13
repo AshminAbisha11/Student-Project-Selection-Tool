@@ -1,0 +1,160 @@
+/* Layout Container - Full screen split layout */
+.login-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  font-family: 'Arial', sans-serif;
+  background-color: #f5f7fa;
+}
+
+/* Centered Header */
+.login-header {
+  text-align: center;
+  padding: 20px 0 10px;
+  font-size: 26px;
+  font-weight: bold;
+  background-color: #ffffff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  z-index: 2;
+}
+
+/* Split Area */
+.login-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Left Section (Form Area) */
+.login-left {
+  flex: 1;
+  padding: 60px 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  background-color: #ffffff;
+}
+
+/* Right Section (Info Area) */
+.login-right {
+  flex: 1;
+  padding: 60px 50px;
+  background-color: #f6f6f6;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+/* Aston Logo */
+.aston-logo {
+  position: absolute;
+  top: 30px;
+  left: 30px;
+  width: 130px;
+}
+
+/* Headings */
+.signin-heading {
+  font-size: 20px;
+  margin-bottom: 25px;
+  font-weight: bold;
+}
+
+h3 {
+  font-size: 18px;
+  margin-bottom: 12px;
+  font-weight: bold;
+}
+
+/* Form Styling */
+form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+}
+
+label {
+  font-size: 14px;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+input {
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  background-color: #c8dbdd;
+  font-size: 14px;
+}
+
+/* Buttons */
+.login-btn,
+.admin-btn,
+.create-account-btn {
+  background-color: #ffe1c2;
+  color: #000;
+  font-weight: bold;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 20px;
+  margin-top: 10px;
+  cursor: pointer;
+  box-shadow: 2px 4px 2px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.login-btn:hover,
+.admin-btn:hover,
+.create-account-btn:hover {
+  transform: translateY(-2px);
+  background-color: #ffdbb0;
+}
+
+/* Horizontal Button Group */
+.button-group {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* Forgot Password */
+.forgot-text {
+  font-size: 13px;
+  color: #555;
+  margin-top: -10px;
+}
+
+/* Right Section Text */
+.login-right p {
+  font-size: 14px;
+  color: #444;
+  margin-bottom: 25px;
+  max-width: 400px;
+}
+
+/* Right Section Illustration */
+.login-right img {
+  width: 250px;
+  margin-top: 20px;
+}
+
+/* Success & Error messages */
+.error-msg {
+  color: #d93025;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.success-msg {
+  color: #188038;
+  font-size: 13px;
+  margin-top: 12px;
+}
