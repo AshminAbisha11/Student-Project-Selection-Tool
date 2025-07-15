@@ -1,47 +1,88 @@
 .register-container {
-    display: flex;
-    justify-content: space-between;
-    padding: 40px;
-    font-family: Arial, sans-serif;
-  }
-  
-  .register-form {
-    width: 50%;
-    padding-right: 20px;
-  }
-  
-  .register-form h2 {
-    margin-bottom: 20px;
-  }
-  
-  .register-form form input,
-  .register-form form select {
-    display: block;
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 15px;
-  }
-  
-  .register-form form button {
-    padding: 10px 20px;
-    background-color: #f1c40f;
-    border: none;
-    cursor: pointer;
-  }
-  
-  .register-side {
-    width: 40%;
-    background-color: #fafafa;
-    padding: 30px;
-    border-left: 1px solid #ddd;
-    text-align: center;
-  }
-  
-  .signin-btn {
-    margin-top: 10px;
-    padding: 10px 20px;
-    background-color: #eee;
-    border: none;
-    cursor: pointer;
-  }
-  
+  display: flex;
+  justify-content: space-between;
+  height: 100vh;
+  font-family: Arial, sans-serif;
+}
+
+.register-left, .register-right {
+  width: 50%;
+  padding: 40px;
+  box-sizing: border-box;
+}
+
+/* Header with logo and title */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 100px;
+}
+
+.aston-logo {
+  width: 50px;
+  height: auto;
+}
+
+.portal-title {
+  font-size: 30px;
+  font-weight: bold;
+  margin: 0;
+}
+
+.create-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 20px 0;
+}
+
+/* Form styling */
+form label {
+  font-weight: bold;
+  margin: 12px 0 6px;
+  display: block;
+}
+
+form input,
+form select {
+  width: 100%;
+  padding: 10px;
+  background-color: #cfe0e4;
+  border: none;
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+.button-group {
+  display: flex;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.register-btn,
+.admin-btn,
+.signin-btn {
+  background-color: #fce3c1;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: bold;
+  box-shadow: 2px 2px 5px #ddd;
+}
+
+.register-right {
+  background-color: #fafafa;
+  border-left: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.right-image {
+  margin-top: 20px;
+  width: 80%;
+  max-width: 400px;
+}
