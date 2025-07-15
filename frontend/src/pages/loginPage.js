@@ -35,6 +35,7 @@ const LoginPage = () => {
       const res = await axios.post('http://localhost:5000/login', formData);
       setSuccess(res.data.message);
       console.log('Login successful:', res.data);
+      navigate('/student-dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     }

@@ -11,6 +11,7 @@ require('dotenv').config();
 
 const loginRoutes = require('./routes/loginRoutes');
 const registerRoutes = require('./routes/registerRoutes');
+const studentDashboardRoutes = require('./routes/studentDashboardRoutes');
 
 
 
@@ -27,6 +28,7 @@ app.use(express.json());
  */ 
 app.use("/login", loginRoutes);
 app.use("/signup" ,registerRoutes);
+app.use("/dashboard", studentDashboardRoutes);
 
 
 
