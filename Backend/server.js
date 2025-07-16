@@ -12,7 +12,7 @@ require('dotenv').config();
 const loginRoutes = require('./routes/loginRoutes');
 const registerRoutes = require('./routes/registerRoutes');
 const studentDashboardRoutes = require('./routes/studentDashboardRoutes');
-
+const projectRoutes = require('./routes/projectRoutes');
 
 
 
@@ -29,7 +29,7 @@ app.use(express.json());
 app.use("/login", loginRoutes);
 app.use("/signup" ,registerRoutes);
 app.use("/dashboard", studentDashboardRoutes);
-
+app.use("/projects", projectRoutes);
 
 
 
