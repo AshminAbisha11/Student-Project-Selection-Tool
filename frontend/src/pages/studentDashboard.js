@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import './studentDashboard.css';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 const StudentDashboard = () => {
+  const navigate = useNavigate();
+
   const [dashboardData, setDashboardData] = useState({
     preferencesCount: 0,
     proposalsSent: 0,
@@ -12,7 +15,7 @@ const StudentDashboard = () => {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const studentId = 1;
+        const studentId = 1; // Replace with dynamic value if available
         const res = await axios.get(`http://localhost:5000/dashboard/${studentId}`);
         setDashboardData(res.data);
       } catch (err) {
@@ -29,10 +32,10 @@ const StudentDashboard = () => {
       <div className="sidebar">
         <img src="/assets/aston_logo.png" alt="Aston Logo" className="sidebar-logo" />
         <ul>
-          <li>Browse Projects</li>
-          <li>My Preferences</li>
-          <li>My Proposals</li>
-          <li>Logout</li>
+          <li onClick={() => navigate('/browse-projects')}>Browse Projects</li>
+          <li onClick={() => navigate('/my-preferences')}>My Preferences</li>
+          <li onClick={() => navigate('/my-proposals')}>My Proposals</li>
+          <li onClick={() => navigate('/login')}>Logout</li>
         </ul>
       </div>
 
@@ -48,7 +51,7 @@ const StudentDashboard = () => {
           <p>Here’s a quick overview of your project journey</p>
         </div>
 
-        {/* Info Boxes */}
+        {/* Info Cards */}
         <div className="dashboard-cards">
           <div className="dashboard-card">
             <h4>{dashboardData.preferencesCount}</h4>
@@ -64,12 +67,12 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* Quick Actions */}
         <div className="dashboard-actions">
           <h4>Quick Actions Card</h4>
-          <button>Browse Projects</button>
-          <button>Submit Proposal</button>
-          <button>Edit Preferences</button>
+          <button onClick={() => navigate('/browse-projects')}>Browse Projects</button>
+          <button onClick={() => navigate('/submit-proposal')}>Submit Proposal</button>
+          <button onClick={() => navigate('/edit-preferences')}>Edit Preferences</button>
         </div>
       </div>
     </div>

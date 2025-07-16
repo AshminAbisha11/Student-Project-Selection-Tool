@@ -1,0 +1,46 @@
+.project-card {
+  width: 300px;
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.project-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.heart-icon {
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.project-card p {
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.project-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.project-actions button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: #003366;
+  color: white;
+  cursor: pointer;
+}
+
+.project-actions .secondary {
+  background-color: #fbb03b;
+  color: #000;
+}
