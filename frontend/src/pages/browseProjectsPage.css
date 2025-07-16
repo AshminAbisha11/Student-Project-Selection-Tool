@@ -1,0 +1,16 @@
+.browse-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.projects-area {
+  flex-grow: 1;
+  padding: 20px;
+  background-color: #e8e8e8;
+}
+
+.project-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
