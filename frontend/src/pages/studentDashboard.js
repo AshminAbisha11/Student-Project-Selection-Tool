@@ -2,20 +2,23 @@ import React, { useEffect, useState } from 'react';
 import './studentDashboard.css';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import Sidebar from '../components/sideBar'; 
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
-
   const [dashboardData, setDashboardData] = useState({
     preferencesCount: 0,
     proposalsSent: 0,
     applicationStatus: 'Pending',
   });
 
+  const student = JSON.parse(localStorage.getItem('student'));
+  const studentId = student?.user_id;
+
   useEffect(() => {
     const fetchDashboard = async () => {
+      if (!studentId) return;
       try {
-        const studentId = 1; // Replace with dynamic value if available
         const res = await axios.get(`http://localhost:5000/dashboard/${studentId}`);
         setDashboardData(res.data);
       } catch (err) {
@@ -24,22 +27,12 @@ const StudentDashboard = () => {
     };
 
     fetchDashboard();
-  }, []);
+  }, [studentId]);
 
   return (
     <div className="dashboard-container">
-      {/* Sidebar */}
-      <div className="sidebar">
-        <img src="/assets/aston_logo.png" alt="Aston Logo" className="sidebar-logo" />
-        <ul>
-          <li onClick={() => navigate('/browse-projects')}>Browse Projects</li>
-          <li onClick={() => navigate('/my-preferences')}>My Preferences</li>
-          <li onClick={() => navigate('/my-proposals')}>My Proposals</li>
-          <li onClick={() => navigate('/login')}>Logout</li>
-        </ul>
-      </div>
-
-      {/* Main Panel */}
+      <Sidebar/> 
+      
       <div className="dashboard-main">
         <header className="dashboard-header">
           <h2>Aston Project Portal</h2>
@@ -47,7 +40,7 @@ const StudentDashboard = () => {
         </header>
 
         <div className="dashboard-welcome">
-          <h3>Welcome, Ashmin!</h3>
+          <h3>Welcome, {student?.name || 'Student'}!</h3>
           <p>Here’s a quick overview of your project journey</p>
         </div>
 
@@ -67,9 +60,8 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* Quick Actions */}
         <div className="dashboard-actions">
-          <h4>Quick Actions Card</h4>
+          <h4>Quick Actions</h4>
           <button onClick={() => navigate('/browse-projects')}>Browse Projects</button>
           <button onClick={() => navigate('/submit-proposal')}>Submit Proposal</button>
           <button onClick={() => navigate('/edit-preferences')}>Edit Preferences</button>

@@ -1,0 +1,58 @@
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  width: 220px;
+  background-color: #f4f4f4;
+  padding-top: 20px;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Logo */
+.sidebar-logo {
+  width: 140px;
+  margin-bottom: 40px;
+}
+
+/* Sidebar menu list */
+.sidebar ul {
+  list-style-type: none;
+  padding: 0;
+  width: 100%;
+}
+
+/* Sidebar list items */
+.sidebar ul li {
+  padding: 15px 20px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-size: 16px;
+  color: #333;
+  border-left: 4px solid transparent;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.sidebar ul li:hover {
+  background-color: #e0e0e0;
+  border-left: 4px solid #003366; /* Aston blue */
+  font-weight: 500;
+}
+
+/* Active state (optional if using active route highlighting) */
+.sidebar ul li.active {
+  background-color: #e0e0e0;
+  border-left: 4px solid #003366;
+  font-weight: bold;
+}
+
+/* Responsive: Hide sidebar on small screens */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+}

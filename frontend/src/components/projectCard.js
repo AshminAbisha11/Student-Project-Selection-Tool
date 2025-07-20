@@ -1,7 +1,7 @@
 import React from 'react';
 import './projectCard.css';
 
-const ProjectCard = ({ project, onViewDetails }) => {
+const ProjectCard = ({ project, onViewDetails, onAddPreference }) => {
   const quotaRemaining = project.quota - project.spots_filled;
 
   return (
@@ -13,11 +13,15 @@ const ProjectCard = ({ project, onViewDetails }) => {
 
       <p><strong>Supervisor:</strong> {project.supervisor_name}</p>
       <p><strong>Description:</strong> {project.description.slice(0, 100)}...</p>
-      <p><strong>Quota remaining:</strong> {quotaRemaining} / {project.quota} spot{project.quota > 1 ? 's' : ''} available</p>
+      <p>
+        <strong>Quota remaining:</strong> {quotaRemaining} / {project.quota} spot{project.quota > 1 ? 's' : ''} available
+      </p>
 
       <div className="project-actions">
-        <button onClick={onViewDetails}>View Details</button>
-        <button className="secondary">Add to Preference</button>
+        <button onClick={() => onViewDetails(project)}>View Details</button>
+        <button className="secondary" onClick={() => onAddPreference(project.project_id)}>
+          Add to Preference
+        </button>
       </div>
     </div>
   );

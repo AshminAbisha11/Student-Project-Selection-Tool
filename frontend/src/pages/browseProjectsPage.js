@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import FilterBar from '../components/filterBar';
 import ProjectCard from '../components/projectCard';
 import HeaderBar from '../components/headerBar';
@@ -10,18 +11,20 @@ const BrowseProjectsPage = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
+  const navigate = useNavigate();
 
   // Fetch all projects
   const fetchAllProjects = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/projects`);
+      const response = await fetch('http://localhost:5000/projects');
       const data = await response.json();
       setProjects(data || []);
     } catch (err) {
       console.error('Error fetching all projects:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Fetch filtered projects
@@ -34,11 +37,12 @@ const BrowseProjectsPage = () => {
       setProjects(data.projects || []);
     } catch (err) {
       console.error('Error fetching filtered projects:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // Fetch full project details by ID
+  // Fetch full project details
   const handleViewDetails = async (projectId) => {
     try {
       const response = await fetch(`http://localhost:5000/projects/details/${projectId}`);
@@ -49,7 +53,37 @@ const BrowseProjectsPage = () => {
     }
   };
 
-  // Load all projects on mount
+  // Add project to preferences (uses JWT token)
+  const handleAddPreference = async (projectId) => {
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      alert('You must be logged in as a student to add preferences.');
+      return;
+    }
+
+    try {
+      const res = await fetch('http://localhost:5000/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+
+      if (res.ok) {
+        navigate('/my-preferences');
+      } else {
+        const errData = await res.json();
+        alert(`Failed to add preference: ${errData.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error adding preference:', err);
+      alert('Something went wrong. Please try again.');
+    }
+  };
+
   useEffect(() => {
     fetchAllProjects();
   }, []);
@@ -82,9 +116,10 @@ const BrowseProjectsPage = () => {
               {projects.length > 0 ? (
                 projects.map(project => (
                   <ProjectCard 
-                    key={project.project_id} 
-                    project={project} 
-                    onViewDetails={() => handleViewDetails(project.project_id)} 
+                    key={project.project_id}
+                    project={project}
+                    onViewDetails={() => handleViewDetails(project.project_id)}
+                    onAddPreference={() => handleAddPreference(project.project_id)}
                   />
                 ))
               ) : (
@@ -95,7 +130,6 @@ const BrowseProjectsPage = () => {
         </div>
       </div>
 
-      {/* View Details Modal */}
       {selectedProject && (
         <ProjectDetailsModal 
           project={selectedProject}
