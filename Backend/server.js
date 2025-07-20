@@ -8,11 +8,12 @@ const db = require('./config/db');
 require('dotenv').config();
 
 
-
+const verifyToken = require('./middleware/authMiddleware');
 const loginRoutes = require('./routes/loginRoutes');
 const registerRoutes = require('./routes/registerRoutes');
 const studentDashboardRoutes = require('./routes/studentDashboardRoutes');
 const projectRoutes = require('./routes/projectRoutes');
+const preferenceRoutes = require('./routes/preferenceRoutes');
 
 
 
@@ -30,6 +31,7 @@ app.use("/login", loginRoutes);
 app.use("/signup" ,registerRoutes);
 app.use("/dashboard", studentDashboardRoutes);
 app.use("/projects", projectRoutes);
+app.use("/preferences", preferenceRoutes);
 
 
 
