@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const dashboardController = require('../controllers/dashboardController');
 
-// Route to get student dashboard overview
-router.get('/:studentId', dashboardController.getStudentDashboard);
+const dashboardController = require('../controllers/dashboardController');
+const verifyToken = require('../middleware/authMiddleware'); 
+
+router.get('/:id', verifyToken, dashboardController.getStudentDashboard); 
 
 module.exports = router;
