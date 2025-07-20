@@ -4,7 +4,7 @@ import './loginPage.css';
 import axios from 'axios';
 
 const LoginPage = () => {
-  const navigate = useNavigate(); // Navigation hook
+  const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
     email: '',
@@ -33,28 +33,39 @@ const LoginPage = () => {
 
     try {
       const res = await axios.post('http://localhost:5000/login', formData);
-      setSuccess(res.data.message);
-      console.log('Login successful:', res.data);
-      navigate('/student-dashboard');
+
+      if (res.data && res.data.user) {
+        const { user_id, role } = res.data.user;
+        const token = res.data.token;
+
+        localStorage.setItem('studentId', res.data.user.user_id); 
+        localStorage.setItem('role', res.data.user.role);
+        localStorage.setItem('token', res.data.token);
+
+        setSuccess(res.data.message || 'Login successful');
+        console.log('Login success:', res.data);
+
+        navigate('/student-dashboard');
+      } else {
+        setError('Invalid response from server.');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     }
   };
 
   const handleCreateAccount = () => {
-    navigate('/register'); // Navigate to register route
+    navigate('/register');
   };
 
   return (
     <div className="login-container">
-      {/* Centered Heading */}
       <div className="login-header">
         Aston University Project Portal
       </div>
 
-      {/* Split Panel */}
       <div className="login-body">
-        {/* Left Panel */}
+        {/* Left */}
         <div className="login-left">
           <img src="/assets/aston_logo.png" alt="Aston University" className="aston-logo" />
           <h2 className="signin-heading">Log in to your account</h2>
@@ -90,7 +101,7 @@ const LoginPage = () => {
           </form>
         </div>
 
-        {/* Right Panel */}
+        {/* Right */}
         <div className="login-right">
           <h3>New to the Project Portal?</h3>
           <p>
