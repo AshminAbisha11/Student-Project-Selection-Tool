@@ -1,0 +1,83 @@
+/* Page Container */
+.proposal-page {
+  display: flex;
+  min-height: 100vh;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f9f9f9;
+}
+
+/* Content beside the Sidebar */
+.proposal-content {
+  flex: 1;
+  padding: 40px 60px;
+  margin-left: 240px; /* Adjust to match sidebar width */
+  background-color: #ffffff;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.03);
+}
+
+/* Heading */
+.proposal-content h2 {
+  font-size: 28px;
+  margin-bottom: 30px;
+  color: #333;
+  font-weight: 600;
+}
+
+/* Form Layout */
+.proposal-form {
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Form Labels */
+.proposal-form label {
+  font-weight: 500;
+  color: #444;
+}
+
+/* Input Elements */
+.proposal-form input[type="text"],
+.proposal-form input[type="file"],
+.proposal-form textarea,
+.proposal-form select {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 15px;
+  background-color: #fdfdfd;
+  transition: border-color 0.2s ease;
+}
+
+/* Input Focus */
+.proposal-form input:focus,
+.proposal-form textarea:focus,
+.proposal-form select:focus {
+  outline: none;
+  border-color: #6a5acd;
+}
+
+/* Textarea Specifics */
+.proposal-form textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+/* Submit Button */
+.proposal-form button[type="submit"] {
+  padding: 12px 18px;
+  background-color: #6a5acd;
+  color: white;
+  font-size: 16px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+/* Button Hover */
+.proposal-form button[type="submit"]:hover {
+  background-color: #5943c2;
+}
