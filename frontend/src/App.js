@@ -8,6 +8,7 @@ import BrowseProjectsPage from './pages/browseProjectsPage';
 import MyPreferencesPage from './pages/myPreferencePage';
 import MyProposalPage from './pages/myProposalPage';
 import ForgotPasswordPage from './pages/forgotPasswordPage';
+import ResetPasswordPage from './pages/resetPasswordPage'; 
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
 
         {/* Student Features */}
         <Route path="/student-dashboard" element={<StudentDashboard />} />
