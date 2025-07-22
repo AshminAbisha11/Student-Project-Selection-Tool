@@ -15,7 +15,7 @@ const studentDashboardRoutes = require('./routes/studentDashboardRoutes');
 const projectRoutes = require('./routes/projectRoutes');
 const preferenceRoutes = require('./routes/preferenceRoutes');
 const proposalRoutes = require('./routes/proposalRoutes');
-
+const forgetPasswordRoutes = require('./routes/forgetPasswordRoutes');
 
 
 const app = express();
@@ -34,7 +34,7 @@ app.use("/dashboard", studentDashboardRoutes);
 app.use("/projects", projectRoutes);
 app.use("/preferences", preferenceRoutes);
 app.use("/proposals", proposalRoutes);
-
+app.use("/forgot-password", forgetPasswordRoutes);
 
 
 // Start server
