@@ -149,4 +149,42 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+//reset - password
+exports.resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  if (!token || !password) {
+    return res.status(400).json({ message: 'Token and password are required.' });
+  }
+
+  try {
+    // 1. Find the user with the matching reset token
+    const [user] = await db.query(
+      'SELECT * FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()',
+      [token]
+    );
+
+    if (!user.length) {
+      return res.status(400).json({ message: 'Invalid or expired token.' });
+    }
+
+    // 2. Hash the new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 3. Update the user's password and clear the reset token
+    await db.query(
+      'UPDATE users SET password = ?, reset_token = NULL, reset_token_expiry = NULL WHERE reset_token = ?',
+      [hashedPassword, token]
+    );
+
+    res.json({ message: 'Password reset successful. You can now log in.' });
+
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+
 
