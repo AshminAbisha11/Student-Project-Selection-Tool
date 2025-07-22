@@ -1,6 +1,8 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 exports.loginUser = async (req, res) => {
   try {
@@ -101,4 +103,50 @@ exports.registerUser = async (req, res) => {
     res.status(500).json({ message: 'Internal server error.' });
   }
 };
+
+
+exports.forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) return res.status(400).json({ message: 'Email is required.' });
+
+  try {
+    const [user] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (!user.length) {
+      return res.status(404).json({ message: 'No user with that email.' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 3600000); // 1 hour from now
+
+    await db.query(
+      'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
+      [token, expires, email]
+    );
+
+    const resetLink = `http://localhost:3000/reset-password/${token}`;
+
+    // Send email using Nodemailer
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_APP_PASSWORD
+      }
+    });
+
+    await transporter.sendMail({
+      to: email,
+      subject: 'Password Reset',
+      html: `<p>Click <a href="${resetLink}">here</a> to reset your password. This link will expire in 1 hour.</p>`
+    });
+
+    res.json({ message: 'Password reset link sent to email.' });
+
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 
