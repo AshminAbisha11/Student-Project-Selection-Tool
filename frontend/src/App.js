@@ -6,7 +6,8 @@ import LoginPage from './pages/loginPage';
 import StudentDashboard from './pages/studentDashboard';
 import BrowseProjectsPage from './pages/browseProjectsPage';
 import MyPreferencesPage from './pages/myPreferencePage';
-import MyProposalPage from './pages/myProposalPage'; 
+import MyProposalPage from './pages/myProposalPage';
+import ForgotPasswordPage from './pages/forgotPasswordPage';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         {/* Authentication */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
         {/* Student Features */}
         <Route path="/student-dashboard" element={<StudentDashboard />} />
