@@ -1,88 +1,100 @@
 .register-container {
   display: flex;
-  justify-content: space-between;
-  height: 100vh;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-repeat: no-repeat;
+  background-size: cover;
   font-family: Arial, sans-serif;
+  padding: 40px;
 }
 
-.register-left, .register-right {
-  width: 50%;
+.register-box {
+  display: flex;
+  width: 90%;
+  max-width: 1200px;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.register-left,
+.register-right {
+  flex: 1;
   padding: 40px;
   box-sizing: border-box;
 }
 
-/* Header with logo and title */
 .header {
   display: flex;
   align-items: center;
-  gap: 15px;
-  margin-bottom: 100px;
+  gap: 10px;
+  margin-bottom: 30px;
 }
 
 .aston-logo {
-  width: 50px;
+  width: 45px;
   height: auto;
 }
 
 .portal-title {
-  font-size: 30px;
+  font-size: 22px;
   font-weight: bold;
-  margin: 0;
 }
 
 .create-title {
   font-size: 24px;
-  font-weight: bold;
-  margin: 20px 0;
+  margin-bottom: 20px;
 }
 
-/* Form styling */
 form label {
   font-weight: bold;
-  margin: 12px 0 6px;
   display: block;
+  margin-top: 15px;
 }
 
 form input,
 form select {
   width: 100%;
   padding: 10px;
-  background-color: #cfe0e4;
+  background-color: #dce9ec;
   border: none;
   border-radius: 6px;
-  margin-bottom: 10px;
+  margin-top: 5px;
 }
 
 .button-group {
-  display: flex;
-  gap: 15px;
   margin-top: 20px;
+  display: flex;
+  gap: 10px;
 }
 
 .register-btn,
 .admin-btn,
 .signin-btn {
-  background-color: #fce3c1;
-  border: none;
   padding: 10px 20px;
-  border-radius: 10px;
+  border: none;
+  border-radius: 8px;
+  background-color: #6a0dad;
+  color: white;
   cursor: pointer;
   font-weight: bold;
-  box-shadow: 2px 2px 5px #ddd;
+  box-shadow: 2px 2px 5px #ccc;
 }
 
 .register-right {
-  background-color: #fafafa;
-  border-left: 1px solid #eee;
+  background-color: #6e7f86;
+  color: white;
+  text-align: center;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  text-align: center;
 }
 
 .right-image {
-  margin-top: 20px;
   width: 80%;
-  max-width: 400px;
+  max-width: 500px;
+  margin-top: 20px;
 }
