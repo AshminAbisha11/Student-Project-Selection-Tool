@@ -1,3 +1,4 @@
+/* Sidebar container */
 .sidebar {
   position: fixed;
   left: 0;
@@ -5,52 +6,52 @@
   height: 100vh;
   width: 220px;
   background-color: #f4f4f4;
-  padding-top: 20px;
-  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  padding: 20px 0;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
   align-items: center;
+  z-index: 999;
+  overflow-y: auto;
 }
 
 /* Logo */
 .sidebar-logo {
   width: 140px;
-  margin-bottom: 40px;
+  margin-bottom: 30px;
 }
 
 /* Sidebar menu list */
 .sidebar ul {
   list-style-type: none;
   padding: 0;
+  margin: 0;
   width: 100%;
 }
 
 /* Sidebar list items */
 .sidebar ul li {
-  padding: 15px 20px;
+  padding: 12px 20px;
   width: 100%;
   text-align: left;
   cursor: pointer;
   font-size: 16px;
   color: #333;
   border-left: 4px solid transparent;
-  transition: background-color 0.3s, border-color 0.3s;
+  background-color: transparent;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
 }
 
-.sidebar ul li:hover {
-  background-color: #e0e0e0;
-  border-left: 4px solid #003366; /* Aston blue */
-  font-weight: 500;
-}
-
-/* Active state (optional if using active route highlighting) */
+/* Hover and active styling */
+.sidebar ul li:hover,
 .sidebar ul li.active {
   background-color: #e0e0e0;
-  border-left: 4px solid #003366;
-  font-weight: bold;
+  border-left: 4px solid #4b2e83; /* Aston purple */
+  font-weight: 600;
 }
 
-/* Responsive: Hide sidebar on small screens */
+/* Responsive: hide on smaller screens */
 @media (max-width: 768px) {
   .sidebar {
     display: none;

@@ -34,16 +34,17 @@ const LoginPage = () => {
     try {
       const res = await axios.post('http://localhost:5000/login', formData);
 
-      if (res.data && res.data.user) {
-        const { user_id, role, token } = res.data.user;
+      if (res.data && res.data.user && res.data.token) {
+        const { user, token } = res.data;
 
-        localStorage.setItem('studentId', user_id);
-        localStorage.setItem('role', role);
+        // Store full user info (name, id, email, role)
+        localStorage.setItem('student', JSON.stringify(user));
         localStorage.setItem('token', token);
 
         setSuccess(res.data.message || 'Login successful');
         console.log('Login success:', res.data);
 
+        // ✅ Navigate to dashboard
         navigate('/student-dashboard');
       } else {
         setError('Invalid response from server.');
