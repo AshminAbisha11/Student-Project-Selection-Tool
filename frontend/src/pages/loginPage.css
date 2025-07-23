@@ -239,4 +239,19 @@ html, body {
 }
 
 
+.forgot-password {
+  font-size: 14px;
+  color: #555;
+  text-decoration: underline;
+  margin-top: 8px;
+  margin-bottom: 12px;
+  display: inline-block;
+  transition: color 0.3s ease;
+  cursor: pointer; 
+}
+
+.forgot-password:hover {
+  color: #53128d;
+}
+
 }

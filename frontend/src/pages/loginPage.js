@@ -71,7 +71,7 @@ const LoginPage = () => {
         <div className="login-left">
           <div className="header-title">
             <img src="/assets/aston_logo.png" alt="Aston University Logo" className="logo" />
-            <h1 className="tool-title">Student Project Selection Tool</h1>
+            <h1 className="tool-title">Student Project Selection Portal</h1>
           </div>
 
           <h2 className="login-heading">Log in to your account</h2>
