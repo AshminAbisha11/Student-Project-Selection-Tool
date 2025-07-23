@@ -2,6 +2,7 @@ const db = require('../config/db');
 const path = require('path');
 const fs = require('fs');
 
+// Submit a new proposal
 exports.submitProposal = async (req, res) => {
   const { student_id, supervisor_id, title, description } = req.body;
   const file = req.file;
@@ -26,3 +27,23 @@ exports.submitProposal = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// Get proposals submitted by a student
+exports.getProposalsByStudent = async (req, res) => {
+  const studentId = req.params.studentId;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT id AS proposal_id, title, description, file_path
+       FROM proposals
+       WHERE student_id = ?`,
+      [studentId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Error retrieving proposals:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+

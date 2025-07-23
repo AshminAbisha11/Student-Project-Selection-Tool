@@ -3,8 +3,9 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const proposalController = require('../controllers/proposalController');
+const verifyToken = require('../middleware/authMiddleware'); 
 
-// Set up multer for file uploads
+// Multer setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, 'uploads/'),
   filename: (req, file, cb) => {
@@ -14,7 +15,8 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// POST route to submit a proposal
-router.post('/', upload.single('file'), proposalController.submitProposal);
+// Routes
+router.post('/', verifyToken, upload.single('file'), proposalController.submitProposal);
+router.get('/:studentId', verifyToken, proposalController.getProposalsByStudent);
 
 module.exports = router;
