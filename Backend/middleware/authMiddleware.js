@@ -1,21 +1,28 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config(); 
+const { isTokenBlacklisted } = require('../models/blacklistModel');
 
-const verifyToken = (req, res, next) => {
+
+
+const verifyToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  if (!authHeader) return res.status(401).json({ message: 'Authorization header missing' });
+  const token = authHeader && authHeader.split(' ')[1];
 
-  const token = authHeader.split(' ')[1];
-  console.log("Token:", token);
-  if (!token) return res.status(401).json({ message: 'Token missing' });
+  if (!token) {
+    return res.status(401).json({ message: 'Access denied. No token provided.' });
+  }
+
+  const blacklisted = await isTokenBlacklisted(token);
+  if (blacklisted) {
+    return res.status(403).json({ message: 'Token has been blacklisted.' });
+  }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
-    console.log("Decoded token:", decoded);
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(403).json({ message: 'Invalid token' }); 
+    return res.status(403).json({ message: 'Invalid or expired token.' });
   }
 };
 
