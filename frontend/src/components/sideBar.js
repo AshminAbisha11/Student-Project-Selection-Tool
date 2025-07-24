@@ -13,7 +13,8 @@ const Sidebar = () => {
         <li onClick={() => navigate('/browse-projects')}>Browse Projects</li>
         <li onClick={() => navigate('/my-preferences')}>My Preferences</li>
         <li onClick={() => navigate('/my-proposals')}>My Proposals</li>
-        <li onClick={() => navigate('/login')}>Logout</li>
+        <li onClick={() => navigate('/logout')}>Logout</li>
+
       </ul>
     </div>
   );

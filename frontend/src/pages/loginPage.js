@@ -32,19 +32,23 @@ const LoginPage = () => {
     }
 
     try {
+      // Clear old token (if any) before login
+      localStorage.removeItem('student');
+      localStorage.removeItem('token');
+
       const res = await axios.post('http://localhost:5000/login', formData);
 
       if (res.data && res.data.user && res.data.token) {
         const { user, token } = res.data;
 
-        // Store full user info (name, id, email, role)
+        // Save fresh data
         localStorage.setItem('student', JSON.stringify(user));
         localStorage.setItem('token', token);
 
         setSuccess(res.data.message || 'Login successful');
         console.log('Login success:', res.data);
 
-        // ✅ Navigate to dashboard
+        // ✅ Redirect to dashboard
         navigate('/student-dashboard');
       } else {
         setError('Invalid response from server.');

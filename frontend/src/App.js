@@ -9,6 +9,7 @@ import MyPreferencesPage from './pages/myPreferencePage';
 import MyProposalPage from './pages/myProposalPage';
 import ForgotPasswordPage from './pages/forgotPasswordPage';
 import ResetPasswordPage from './pages/resetPasswordPage'; 
+import LogoutPage from './pages/logoutPage'; 
 
 function App() {
   return (
@@ -28,6 +29,9 @@ function App() {
         <Route path="/browse-projects" element={<BrowseProjectsPage />} />
         <Route path="/my-preferences" element={<MyPreferencesPage />} />
         <Route path="/my-proposals" element={<MyProposalPage />} />
+
+        {/* Logout Route */}
+        <Route path="/logout" element={<LogoutPage />} /> 
       </Routes>
     </Router>
   );
