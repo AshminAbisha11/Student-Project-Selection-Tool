@@ -209,4 +209,28 @@ exports.logoutUser = async (req, res) => {
   }
 };
 
+//change password
+exports.changePassword = async (req, res) => {
+  const userId = req.user.user_id;
+  const { currentPassword, newPassword } = req.body;
 
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: 'Both current and new passwords are required.' });
+  }
+
+  try {
+    const [users] = await db.query('SELECT password FROM users WHERE user_id = ?', [userId]);
+    if (users.length === 0) return res.status(404).json({ message: 'User not found.' });
+
+    const valid = await bcrypt.compare(currentPassword, users[0].password);
+    if (!valid) return res.status(401).json({ message: 'Current password is incorrect.' });
+
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    await db.query('UPDATE users SET password = ? WHERE user_id = ?', [hashedNewPassword, userId]);
+
+    res.status(200).json({ message: 'Password updated successfully.' });
+  } catch (err) {
+    console.error('Password change error:', err);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};

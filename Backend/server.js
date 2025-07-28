@@ -18,7 +18,7 @@ const proposalRoutes = require('./routes/proposalRoutes');
 const forgetPasswordRoutes = require('./routes/forgetPasswordRoutes');
 const resetPasswordRoutes = require('./routes/resetPasswordRoutes');
 const logoutRoutes = require('./routes/logoutRoutes');
-
+const changePasswordRoutes = require('./routes/changePasswordRoutes');
 
 
 const app = express();
@@ -40,7 +40,7 @@ app.use("/proposals", proposalRoutes);
 app.use("/forgot-password", forgetPasswordRoutes);
 app.use('/reset-password', resetPasswordRoutes);
 app.use('/logout', logoutRoutes);
-
+app.use('/change-password', changePasswordRoutes);
 
 
 // Start server
