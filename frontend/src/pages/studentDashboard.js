@@ -112,7 +112,7 @@ const StudentDashboard = () => {
           <button onClick={() => navigate('/change-password')}>Change Password</button>
           <button onClick={() => navigate('/profile')}>View Profile</button>
           <button onClick={() => navigate('/notifications')}>Notification Settings</button>
-          <button onClick={() => navigate('/help')}>Help & Support</button>
+          <button onClick={() => navigate('/help-support')}>Help & Support</button>
         </div>
       </div>
 

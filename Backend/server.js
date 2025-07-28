@@ -19,6 +19,7 @@ const forgetPasswordRoutes = require('./routes/forgetPasswordRoutes');
 const resetPasswordRoutes = require('./routes/resetPasswordRoutes');
 const logoutRoutes = require('./routes/logoutRoutes');
 const changePasswordRoutes = require('./routes/changePasswordRoutes');
+const feedbackRoutes = require('./routes/feedbackRoutes');
 
 
 const app = express();
@@ -41,7 +42,7 @@ app.use("/forgot-password", forgetPasswordRoutes);
 app.use('/reset-password', resetPasswordRoutes);
 app.use('/logout', logoutRoutes);
 app.use('/change-password', changePasswordRoutes);
-
+app.use('/feedback', feedbackRoutes);
 
 // Start server
 const port = process.env.PORT || 5000;
