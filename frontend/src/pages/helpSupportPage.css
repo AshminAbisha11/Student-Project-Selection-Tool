@@ -1,0 +1,94 @@
+.help-container {
+  background-size: cover;
+  background-position: center;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 60px 20px;
+}
+
+.help-card {
+  background: white;
+  padding: 2.5rem 3rem;
+  border-radius: 16px;
+  max-width: 850px;
+  width: 100%;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+}
+
+.help-title {
+  color: #4b2376;
+  font-size: 1.8rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+.help-section {
+  margin-top: 2rem;
+}
+
+.help-section h3 {
+  color: #333;
+  font-size: 1.2rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.4rem;
+}
+
+.help-list,
+.help-contact {
+  list-style: none;
+  padding-left: 0;
+}
+
+.help-list li,
+.help-contact li {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+
+.help-card a {
+  color: #5c2d91;
+  text-decoration: underline;
+}
+
+.feedback-form {
+  margin-top: 1rem;
+}
+
+.feedback-form textarea {
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 1rem;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.feedback-form button {
+  margin-top: 1rem;
+  padding: 0.7rem 1.5rem;
+  background-color: #5c2d91;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.feedback-form button:hover {
+  background-color: #4a2380;
+}
+
+.feedback-status {
+  margin-top: 0.8rem;
+  font-size: 0.95rem;
+  color: #4b2376;
+  font-style: italic;
+}
