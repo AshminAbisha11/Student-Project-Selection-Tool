@@ -3,6 +3,7 @@ import './studentDashboard.css';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/sideBar';
+import ProfileDropdown from '../components/profileDropdown';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
@@ -83,7 +84,7 @@ const StudentDashboard = () => {
       <div className="dashboard-main">
         <header className="dashboard-header">
           <h2>Student Project Selection Portal</h2>
-          <div className="profile-icon">👤</div>
+          <ProfileDropdown />
         </header>
 
         <div className="dashboard-welcome">
@@ -107,10 +108,11 @@ const StudentDashboard = () => {
         </div>
 
         <div className="dashboard-actions">
-          <h4>Quick Actions</h4>
-          <button onClick={() => navigate('/browse-projects')}>Browse Projects</button>
-          <button onClick={() => navigate('/submit-proposal')}>Submit Proposal</button>
-          <button onClick={() => navigate('/edit-preferences')}>Edit Preferences</button>
+          <h4>Account Tools</h4>
+          <button onClick={() => navigate('/change-password')}>Change Password</button>
+          <button onClick={() => navigate('/profile')}>View Profile</button>
+          <button onClick={() => navigate('/notifications')}>Notification Settings</button>
+          <button onClick={() => navigate('/help')}>Help & Support</button>
         </div>
       </div>
 
@@ -168,4 +170,3 @@ const StudentDashboard = () => {
 };
 
 export default StudentDashboard;
-  
