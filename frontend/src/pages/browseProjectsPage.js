@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FilterBar from '../components/filterBar';
 import ProjectCard from '../components/projectCard';
 import HeaderBar from '../components/headerBar';
 import ProjectDetailsModal from '../components/projectDetailsModal';
 import './browseProjectsPage.css';
+
+const API = 'http://localhost:5000';
 
 const BrowseProjectsPage = () => {
   const [filters, setFilters] = useState({ supervisor: '', topic: '', keyword: '' });
@@ -13,100 +15,104 @@ const BrowseProjectsPage = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const navigate = useNavigate();
 
-  // Fetch all projects
-  const fetchAllProjects = async () => {
+  const fetchAllProjects = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/projects');
-      const data = await response.json();
-      setProjects(data || []);
+      const res = await fetch(`${API}/projects`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to load projects');
+      setProjects(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error fetching all projects:', err);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Fetch filtered projects
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     setLoading(true);
     try {
       const query = new URLSearchParams(filters).toString();
-      const response = await fetch(`http://localhost:5000/projects/filter?${query}`);
-      const data = await response.json();
+      const res = await fetch(`${API}/projects/filters?${query}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered projects');
       setProjects(data.projects || []);
     } catch (err) {
       console.error('Error fetching filtered projects:', err);
+      alert(err.message);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters]);
 
-  // Fetch full project details
   const handleViewDetails = async (projectId) => {
     try {
-      const response = await fetch(`http://localhost:5000/projects/details/${projectId}`);
-      const data = await response.json();
+      const res = await fetch(`${API}/projects/details/${projectId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to load project details');
       setSelectedProject(data);
     } catch (err) {
       console.error('Error fetching project details:', err);
+      alert(err.message);
     }
   };
 
-  // Add project to preferences (uses JWT token)
   const handleAddPreference = async (projectId) => {
     const token = localStorage.getItem('token');
-
     if (!token) {
       alert('You must be logged in as a student to add preferences.');
       return;
     }
-
     try {
-      const res = await fetch('http://localhost:5000/preferences', {
+      const res = await fetch(`${API}/preferences`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ project_id: projectId }),
       });
-
-      if (res.ok) {
-        navigate('/my-preferences');
-      } else {
+      if (!res.ok) {
         const errData = await res.json();
-        alert(`Failed to add preference: ${errData.message || 'Unknown error'}`);
+        throw new Error(errData.message || 'Failed to add preference');
       }
+      navigate('/my-preferences');
     } catch (err) {
       console.error('Error adding preference:', err);
-      alert('Something went wrong. Please try again.');
+      alert(err.message);
     }
   };
 
   useEffect(() => {
     fetchAllProjects();
-  }, []);
+  }, [fetchAllProjects]);
 
-  const handleChange = (e) => {
-    setFilters({ ...filters, [e.target.name]: e.target.value });
-  };
+  const handleChange = (e) =>
+    setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleReset = () => {
     setFilters({ supervisor: '', topic: '', keyword: '' });
     fetchAllProjects();
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') fetchProjects();
+  };
+
   return (
     <>
       <HeaderBar />
       <div className="browse-layout">
-        <FilterBar 
+        <FilterBar
           filters={filters}
           onChange={handleChange}
           onSearch={fetchProjects}
           onReset={handleReset}
+          onKeyDown={handleKeyDown}
         />
+
         <div className="projects-area">
           <h2>Project Listings</h2>
           {loading ? (
@@ -114,8 +120,8 @@ const BrowseProjectsPage = () => {
           ) : (
             <div className="project-grid">
               {projects.length > 0 ? (
-                projects.map(project => (
-                  <ProjectCard 
+                projects.map((project) => (
+                  <ProjectCard
                     key={project.project_id}
                     project={project}
                     onViewDetails={() => handleViewDetails(project.project_id)}
@@ -131,7 +137,7 @@ const BrowseProjectsPage = () => {
       </div>
 
       {selectedProject && (
-        <ProjectDetailsModal 
+        <ProjectDetailsModal
           project={selectedProject}
           onClose={() => setSelectedProject(null)}
         />

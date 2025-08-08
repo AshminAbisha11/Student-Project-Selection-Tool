@@ -6,7 +6,7 @@ const HeaderBar = () => {
     <header className="header-bar">
       <div className="logo-section">
         <img src="/assets/aston_logo.png" alt="Aston Logo" className="logo" />
-        <h1 className="portal-title">Aston Project Portal</h1>
+        <h1 className="portal-title">Student Project Selection Portal</h1>
       </div>
       <div className="search-section">
         <input type="text" placeholder="Search here" />

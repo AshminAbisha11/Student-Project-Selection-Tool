@@ -4,29 +4,93 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(2px); /* slight blur for nice effect */
 }
 
 .modal-container {
-  background: white;
-  padding: 25px;
+  background: #fff;
+  padding: 28px 30px;
   width: 600px;
-  max-height: 80vh;
+  max-width: 90%;
+  max-height: 85vh;
   overflow-y: auto;
-  border-radius: 10px;
+  border-radius: 12px;
   position: relative;
+  box-shadow: 0 10px 30px rgba(75, 35, 118, 0.25);
+  animation: fadeInUp 0.25s ease;
 }
 
+/* Title Styling */
+.modal-container h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #4b2376;
+  margin-bottom: 14px;
+}
+
+/* Section Headings */
+.modal-container p strong {
+  color: #4b2376;
+}
+
+/* Horizontal Rule */
+.modal-container hr {
+  border: none;
+  height: 1px;
+  background: #e1d9f0;
+  margin: 16px 0;
+}
+
+/* Close Button */
 .modal-close {
   position: absolute;
-  top: 10px;
-  right: 15px;
+  top: 12px;
+  right: 16px;
   border: none;
   background: transparent;
   font-size: 1.5rem;
   cursor: pointer;
+  color: #888;
+  transition: color 0.2s ease, transform 0.15s ease;
+}
+.modal-close:hover {
+  color: #4b2376;
+  transform: scale(1.1);
+}
+
+/* Text styling */
+.modal-container p {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+/* Scrollbar Styling */
+.modal-container::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-container::-webkit-scrollbar-thumb {
+  background: #c1b2da;
+  border-radius: 4px;
+}
+.modal-container::-webkit-scrollbar-thumb:hover {
+  background: #a387c8;
+}
+
+/* Animation */
+@keyframes fadeInUp {
+  from { 
+    opacity: 0; 
+    transform: translateY(20px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
 }
