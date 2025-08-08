@@ -13,8 +13,11 @@ const BrowseProjectsPage = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
+  const [searchMsg, setSearchMsg] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
   const navigate = useNavigate();
 
+  // Load all projects
   const fetchAllProjects = useCallback(async () => {
     setLoading(true);
     try {
@@ -22,6 +25,8 @@ const BrowseProjectsPage = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load projects');
       setProjects(Array.isArray(data) ? data : []);
+      setSearchMsg('');
+      setSuggestions([]);
     } catch (err) {
       console.error('Error fetching all projects:', err);
       setProjects([]);
@@ -30,6 +35,7 @@ const BrowseProjectsPage = () => {
     }
   }, []);
 
+  // Load filtered projects
   const fetchProjects = useCallback(async () => {
     setLoading(true);
     try {
@@ -38,6 +44,8 @@ const BrowseProjectsPage = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered projects');
       setProjects(data.projects || []);
+      setSearchMsg('');
+      setSuggestions([]);
     } catch (err) {
       console.error('Error fetching filtered projects:', err);
       alert(err.message);
@@ -46,6 +54,36 @@ const BrowseProjectsPage = () => {
       setLoading(false);
     }
   }, [filters]);
+
+  // Header search -> /projects/search?query=...
+  const handleGlobalSearch = useCallback(async (term) => {
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ query: term }).toString(); // <-- matches your controller
+      const res = await fetch(`${API}/projects/search?${qs}`);
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || data.message || 'Search failed');
+
+      if (Array.isArray(data.projects)) {
+        setProjects(data.projects);
+        setSearchMsg('');
+        setSuggestions([]);
+      } else {
+        // No exact matches: API returns { message, suggestions? }
+        setProjects([]);
+        setSearchMsg(data.message || 'No matches found.');
+        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      }
+    } catch (err) {
+      console.error('Search error:', err);
+      setProjects([]);
+      setSearchMsg(err.message);
+      setSuggestions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const handleViewDetails = async (projectId) => {
     try {
@@ -89,21 +127,22 @@ const BrowseProjectsPage = () => {
     fetchAllProjects();
   }, [fetchAllProjects]);
 
+  // Filters
   const handleChange = (e) =>
     setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleReset = () => {
     setFilters({ supervisor: '', topic: '', keyword: '' });
+    setSearchMsg('');
+    setSuggestions([]);
     fetchAllProjects();
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') fetchProjects();
-  };
+  const handleKeyDown = (e) => { if (e.key === 'Enter') fetchProjects(); };
 
   return (
     <>
-      <HeaderBar />
+      <HeaderBar onSearch={handleGlobalSearch} />
       <div className="browse-layout">
         <FilterBar
           filters={filters}
@@ -115,6 +154,21 @@ const BrowseProjectsPage = () => {
 
         <div className="projects-area">
           <h2>Project Listings</h2>
+
+          {/* Search feedback */}
+          {searchMsg && (
+            <div className="search-feedback" role="status">
+              {searchMsg}
+              {suggestions.length > 0 && (
+                <span> Try: {suggestions.map((s, i) => (
+                  <button key={i} className="suggestion-chip" onClick={() => handleGlobalSearch(s)}>
+                    {s}
+                  </button>
+                ))}</span>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <p>Loading projects...</p>
           ) : (
@@ -129,7 +183,7 @@ const BrowseProjectsPage = () => {
                   />
                 ))
               ) : (
-                <p>No projects found.</p>
+                !searchMsg && <p>No projects found.</p>
               )}
             </div>
           )}
