@@ -1,0 +1,19 @@
+.order-modal-backdrop{
+  position: fixed; inset: 0; background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center; z-index: 2000;
+}
+.order-modal{
+  width: 420px; max-width: 92vw; background: #fff; border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25); padding: 20px;
+}
+.order-modal h3{ margin: 0 0 6px; color:#4b2376; }
+.order-modal .sub{ margin: 0 0 16px; color:#555; }
+.order-modal .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+.order-modal select{
+  padding:10px 12px; border:1px solid #e2e2e8; border-radius:10px; background:#fafafa;
+}
+.order-modal .actions{ display:flex; justify-content:flex-end; gap:10px; }
+.btn{ padding:8px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:700; }
+.btn.btn-outline{ background:#f5f0ff; color:#5c2d91; border:2px solid #5c2d91; }
+.btn.btn-primary{ background:#5c2d91; color:#fff; }
+.btn:disabled{ opacity:.6; cursor:not-allowed; }
