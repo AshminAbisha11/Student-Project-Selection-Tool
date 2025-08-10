@@ -7,22 +7,22 @@ const LogoutPage = () => {
 
   useEffect(() => {
     const logoutUser = async () => {
+      const token = localStorage.getItem('token');
+
       try {
         await fetch('http://localhost:5000/logout', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            Authorization: token ? `Bearer ${token}` : '',
           },
         });
-      } catch (error) {
-        console.error('Logout failed:', error);
+      } catch (err) {
+        console.error('Logout failed (network):', err);
+      } finally {
+        // Clear client state and go to login
+        localStorage.clear(); // clears token, student, etc.
+        navigate('/login', { replace: true });
       }
-
-      // Clear local storage and redirect
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      navigate('/login');
     };
 
     logoutUser();

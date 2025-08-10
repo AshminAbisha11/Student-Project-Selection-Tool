@@ -1,46 +1,111 @@
 /* ===== Global safety: allow page scrolling ===== */
-html, body { 
-  height: auto !important; 
-  overflow-y: auto !important; 
+html, body {
+  height: auto !important;
+  overflow-y: auto !important;
 }
-#root, .App, main { 
-  height: auto !important; 
-  overflow: visible !important; 
-}
-
-*, *::before, *::after { 
-  box-sizing: border-box; 
+#root, .App, main {
+  height: auto !important;
+  overflow: visible !important;
 }
 
-/* ====== Layout: 2-column grid (no overlap) ====== */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ===== Layout: 2-column grid ===== */
 .browse-layout {
   display: grid;
   grid-template-columns: 300px 1fr;
   gap: 24px;
   min-height: 100vh;
-  background-color: #f8f6fc;
+  background: #f8f6fc;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   padding: 32px 24px;
 }
 
-/* ====== Filter Sidebar ====== */
+/* ===== Header: title + preferences row ===== */
+.projects-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px; /* prevents overlap with first card */
+}
+
+.projects-area h2 {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #4b2376;
+}
+
+/* Right-side actions group */
+.pref-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap; /* avoid squish on narrow widths */
+}
+
+/* Make both controls the same visual height */
+.pref-badge,
+.pref-link-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+/* Badge */
+.pref-badge {
+  background: #5c2d91;
+  color: #fff;
+  padding: 8px 14px;          /* compact */
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;            /* compact */
+  letter-spacing: .5px;
+  box-shadow: 0 3px 6px rgba(0,0,0,.12);
+  white-space: nowrap;
+}
+
+/* “View My Preferences” button */
+.pref-link-btn {
+  padding: 8px 14px;          /* match badge */
+  border-radius: 999px;
+  border: 2px solid #5c2d91;
+  background: #fff;
+  color: #5c2d91;
+  font-weight: 700;
+  font-size: 14px;            /* match badge */
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 3px 6px rgba(0,0,0,.08);
+  transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
+}
+.pref-link-btn:hover {
+  background: #f3ecff;
+  box-shadow: 0 5px 14px rgba(0,0,0,0.12);
+}
+.pref-link-btn:active { transform: translateY(1px); }
+.pref-link-btn:focus-visible {
+  outline: 3px solid rgba(92,45,145,.35);
+  outline-offset: 2px;
+}
+
+/* ===== Filter Sidebar ===== */
 .filters-panel {
-  background-color: #ffffff;
+  background: #fff;
   padding: 20px;
   border-radius: 12px;
-  box-shadow: 0 10px 24px rgba(75, 35, 118, 0.12);
+  box-shadow: 0 10px 24px rgba(75,35,118,0.12);
   height: fit-content;
   align-self: start;
 }
-
 .filters-panel h4 {
   margin: 0 0 12px;
   color: #4b2376;
   font-weight: 700;
 }
-
 .filters-panel .field { margin-bottom: 12px; }
-
 .filters-panel input,
 .filters-panel select {
   width: 100%;
@@ -53,15 +118,12 @@ html, body {
   outline: none;
   transition: border-color .2s ease, box-shadow .2s ease;
 }
-
 .filters-panel input:focus,
 .filters-panel select:focus {
   border-color: #5c2d91;
   box-shadow: 0 0 0 4px rgba(92,45,145,.12);
 }
-
 .filters-panel .actions { display: flex; flex-direction: column; gap: 10px; }
-
 .filters-panel .btn {
   width: 100%;
   padding: 10px 14px;
@@ -70,62 +132,52 @@ html, body {
   font-weight: 700;
   font-size: 0.95rem;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(75, 35, 118, 0.12);
+  box-shadow: 0 4px 12px rgba(75,35,118,0.12);
   transition: background-color .2s ease, box-shadow .2s ease, transform .06s ease;
 }
 .filters-panel .btn:active { transform: translateY(1px); }
-
-/* Purple for Search & Reset Filter (force override) */
 .filters-panel .btn.search-btn,
 .filters-panel .btn.reset-btn {
-  background-color: #5c2d91 !important; 
+  background: #5c2d91 !important;
   color: #fff !important;
 }
 .filters-panel .btn.search-btn:hover,
 .filters-panel .btn.reset-btn:hover {
-  background-color: #45217e !important; 
+  background: #45217e !important;
   box-shadow: 0 6px 18px rgba(75,35,118,.18) !important;
 }
 
-/* ====== Projects Area (let page scroll) ====== */
+/* ===== Projects Area ===== */
 .projects-area {
-  padding: 8px 8px 40px 8px;
-  background-color: #f8f6fc;
+  padding: 8px 8px 40px;
+  background: #f8f6fc;
   overflow: visible !important;
   height: auto !important;
 }
 
-.projects-area h2 {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #4b2376;
-  margin-bottom: 28px;
-}
-
-/* ====== Project Grid ====== */
+/* ===== Project Grid ===== */
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 28px;
 }
 
-/* ====== Project Card ====== */
+/* ===== Project Card ===== */
 .project-card {
-  background-color: #ffffff;
+  background: #fff;
   padding: 24px;
   border-radius: 16px;
-  box-shadow: 0 10px 24px rgba(75, 35, 118, 0.12);
+  box-shadow: 0 10px 24px rgba(75,35,118,0.12);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform .2s ease, box-shadow .2s ease;
   position: relative;
 }
 .project-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 16px 36px rgba(75, 35, 118, 0.18);
+  box-shadow: 0 16px 36px rgba(75,35,118,0.18);
 }
-
 .project-card h3 {
   margin: 0 0 10px;
   font-size: 1.05rem;
@@ -144,7 +196,7 @@ html, body {
   margin: 12px 0 8px;
 }
 
-/* ====== Buttons ====== */
+/* Buttons */
 .project-card .buttons {
   display: flex;
   justify-content: space-between;
@@ -159,32 +211,28 @@ html, body {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(75, 35, 118, 0.12);
-  transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.06s ease;
+  box-shadow: 0 4px 12px rgba(75,35,118,0.12);
+  transition: background-color .2s ease, box-shadow .2s ease, transform .06s ease;
 }
 .project-card .buttons button:active { transform: translateY(1px); }
-
-/* View Details in purple */
 .project-card .buttons .view-btn {
-  background-color: #5c2d91 !important; 
+  background: #5c2d91 !important;
   color: #fff !important;
 }
 .project-card .buttons .view-btn:hover {
-  background-color: #45217e !important; 
-  box-shadow: 0 6px 18px rgba(75, 35, 118, 0.18) !important;
+  background: #45217e !important;
+  box-shadow: 0 6px 18px rgba(75,35,118,0.18) !important;
 }
-
-/* Add to Preference in amber */
 .project-card .buttons .pref-btn {
-  background-color: #f4a300; 
+  background: #f4a300;
   color: #fff;
 }
 .project-card .buttons .pref-btn:hover {
-  background-color: #d38d00; 
+  background: #d38d00;
   box-shadow: 0 6px 18px rgba(244,163,0,.25);
 }
 
-/* ====== Heart Icon ====== */
+/* Heart Icon */
 .project-card .favorite-icon {
   position: absolute;
   top: 12px;
@@ -193,7 +241,7 @@ html, body {
   font-size: 1.15rem;
 }
 
-/* ====== Responsive ====== */
+/* ===== Responsive ===== */
 @media (max-width: 900px) {
   .browse-layout {
     grid-template-columns: 1fr;
@@ -201,4 +249,5 @@ html, body {
     padding: 16px;
   }
   .projects-area { padding: 0 0 24px; }
+  .projects-header { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
