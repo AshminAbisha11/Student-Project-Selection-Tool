@@ -6,6 +6,10 @@ import './sideBar.css';
 const Sidebar = () => {
   const navigate = useNavigate();
 
+  const handleLogoutClick = () => {
+    navigate('/logout');
+  };
+
   return (
     <div className="sidebar">
       <img src="/assets/aston_logo.png" alt="Aston Logo" className="sidebar-logo" />
@@ -13,8 +17,7 @@ const Sidebar = () => {
         <li onClick={() => navigate('/browse-projects')}>Browse Projects</li>
         <li onClick={() => navigate('/my-preferences')}>My Preferences</li>
         <li onClick={() => navigate('/my-proposals')}>My Proposals</li>
-        <li onClick={() => navigate('/logout')}>Logout</li>
-
+        <li onClick={handleLogoutClick}>Logout</li>
       </ul>
     </div>
   );

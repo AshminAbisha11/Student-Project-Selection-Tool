@@ -35,12 +35,32 @@
   padding: 8px 12px;
   border: none;
   border-radius: 6px;
-  background-color:  #45217e;
+  background-color: #45217e;
   color: white;
   cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.project-actions button:hover {
+  background-color: #34175f;
 }
 
 .project-actions .secondary {
   background-color: #fbb03b;
   color: #000;
+}
+
+.project-actions .secondary:hover {
+  background-color: #e09a2f;
+}
+
+/* ===== Added to Preference State ===== */
+.project-actions .pref-added {
+  background-color: #cfc9e6; /* Light purple/gray */
+  color: #4b2376;
+  cursor: default;
+}
+
+.project-actions .pref-added:hover {
+  background-color: #cfc9e6; /* No hover effect when added */
 }
