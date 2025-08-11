@@ -16,17 +16,32 @@ import MyPreferencesPage from './pages/myPreferencePage';
 import MyProposalPage from './pages/myProposalPage';
 
 // Supervisor Pages
+import SupervisorDashboardPage from './pages/supervisorDashboardPage';
 import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
 
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
 
+/** Dynamic root redirect:
+ *  - If logged in & supervisor -> /supervisor-dashboard
+ *  - If logged in & student    -> /student-dashboard
+ *  - Otherwise                  -> /login
+ */
+function RootRedirect() {
+  const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+  if (token && user?.role === 'supervisor') return <Navigate to="/supervisor-dashboard" replace />;
+  if (token && user?.role === 'student') return <Navigate to="/student-dashboard" replace />;
+  return <Navigate to="/login" replace />;
+}
+
 function App() {
   return (
     <Router>
       <Routes>
-        {/* Redirect root path to login */}
-        <Route path="/" element={<Navigate to="/login" />} />
+        {/* Smart root */}
+        <Route path="/" element={<RootRedirect />} />
 
         {/* Auth Routes */}
         <Route path="/login" element={<LoginPage />} />
@@ -36,17 +51,21 @@ function App() {
         <Route path="/logout" element={<LogoutPage />} />
         <Route path="/change-password" element={<ChangePassword />} />
 
-        {/* Student Dashboard Routes */}
+        {/* Student Routes */}
         <Route path="/student-dashboard" element={<StudentDashboard />} />
         <Route path="/browse-projects" element={<BrowseProjectsPage />} />
         <Route path="/my-preferences" element={<MyPreferencesPage />} />
         <Route path="/my-proposals" element={<MyProposalPage />} />
 
         {/* Supervisor Routes */}
-        <Route path="/supervisor/create-project" element={<SupervisorCreateProjectPage />} /> {/* ⬅️ NEW */}
+        <Route path="/supervisor-dashboard" element={<SupervisorDashboardPage />} />
+        <Route path="/supervisor/create-project" element={<SupervisorCreateProjectPage />} />
 
         {/* Help & Support */}
         <Route path="/help-support" element={<HelpSupportPage />} />
+
+        {/* Fallback -> root redirect */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );
