@@ -1,0 +1,112 @@
+.createproj-layout{
+  display:flex;
+  min-height:100vh;
+  background:#f7f5fc;
+  font-family:"Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* your SideBar is fixed 220px in your other pages */
+.createproj-main{
+  margin-left:220px;
+  width:calc(100% - 220px);
+  padding:24px;
+}
+
+.createproj-inner{
+  max-width:1000px;
+  margin:12px auto 64px;
+  background:#fff;
+  border-radius:16px;
+  box-shadow:0 10px 24px rgba(75,35,118,.10);
+  padding:22px 22px 26px;
+}
+
+.createproj-header{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:6px;
+}
+
+.createproj-header h2{
+  margin:0;
+  color:#4b2376;
+  font-weight:800;
+}
+
+.cp-alert{
+  margin:10px 0 16px;
+  padding:10px 12px;
+  background:#ffe7ea;
+  color:#8b1a29;
+  border:1px solid #ffccd3;
+  border-radius:10px;
+  font-weight:700;
+}
+
+.cp-form{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.cp-row{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:14px;
+}
+
+.cp-field{ display:flex; flex-direction:column; gap:6px; }
+.cp-field label{ font-weight:700; color:#332b44; }
+.cp-field label span{ color:#b31b1b; }
+
+.cp-field input,
+.cp-field select,
+.cp-field textarea{
+  width:100%;
+  padding:12px 12px;
+  background:#f7f4ff;
+  border:1px solid #e7ddff;
+  border-radius:10px;
+  color:#272727;
+  outline:none;
+  transition:border-color .15s, box-shadow .15s, background .15s;
+}
+
+.cp-field textarea{ resize:vertical; }
+
+.cp-field input:focus,
+.cp-field select:focus,
+.cp-field textarea:focus{
+  background:#fff;
+  border-color:#5c2d91;
+  box-shadow:0 0 0 4px rgba(92,45,145,.15);
+}
+
+.cp-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:6px;
+}
+
+.btn{
+  padding:10px 14px; border-radius:10px; font-weight:800; cursor:pointer;
+  border:none; line-height:1;
+  box-shadow:0 4px 12px rgba(75,35,118,.12);
+  transition:background .15s, box-shadow .15s, transform .06s;
+}
+.btn:active{ transform:translateY(1px); }
+
+.btn-primary{ background:#5c2d91; color:#fff; }
+.btn-primary:hover{ background:#45217e; }
+
+.btn-outline{
+  background:#fff; color:#5c2d91; border:2px solid #5c2d91;
+  box-shadow:0 4px 12px rgba(75,35,118,.10);
+}
+.btn-outline:hover{ background:#f3ecff; }
+
+/* Responsive */
+@media (max-width: 900px){
+  .createproj-main{ margin-left:0; width:100%; padding:16px; }
+  .cp-row{ grid-template-columns: 1fr; }
+}

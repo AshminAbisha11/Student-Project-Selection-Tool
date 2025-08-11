@@ -58,54 +58,65 @@ exports.loginUser = async (req, res) => {
 };
 
 
-// Register User
+// Hard-allow these domains (Gmail is allowed permanently)
+const ALLOWED_DOMAINS = ['aston.ac.uk', 'gmail.com'];
+
+// Helper
+const getDomain = (email) => String(email).toLowerCase().split('@')[1] || '';
+
 exports.registerUser = async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, programme, role } = req.body;
+    let { name, email, password, confirmPassword, programme, role } = req.body;
 
-    //Validate all required fields
-    if (!name || !email || !password || !confirmPassword || !programme || !role) {
+    // basic required fields
+    if (!name || !email || !password || !confirmPassword || !role) {
       return res.status(400).json({ message: 'All fields are required.' });
     }
 
-    //Validate email format
-    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
+    // programme only required for students
+    if (role === 'student' && !programme) {
+      return res.status(400).json({ message: 'Programme is required for students.' });
+    }
+
+    // normalize optional programme
+    if (role !== 'student') programme = null;
+
+    // email format (allow any domain)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ message: 'Invalid email format.' });
     }
 
-    //Validate password strength
-    const passwordStrengthRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*])[A-Za-z\d!@#\$%\^&\*]{8,}$/;
-    if (!passwordStrengthRegex.test(password)) {
+    // password strength
+    const pwStrong =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*])[A-Za-z\d!@#\$%\^&\*]{8,}$/;
+    if (!pwStrong.test(password)) {
       return res.status(400).json({
         message:
-          'Password must be at least 8 characters long, include one uppercase letter, one lowercase, one number, and one special character.',
+          'Password must be at least 8 characters, with upper, lower, number and special character.',
       });
     }
 
-    //Confirm password match
     if (password !== confirmPassword) {
       return res.status(400).json({ message: 'Passwords do not match.' });
     }
 
-    //Check if user already exists
-    const [existingUser] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (existingUser.length > 0) {
+    // unique email
+    const [existing] = await db.query('SELECT user_id FROM users WHERE email = ?', [email]);
+    if (existing.length) {
       return res.status(400).json({ message: 'Email already registered.' });
     }
 
-    //Hash the password
-    const hashedPassword = await bcrypt.hash(password,8);
+    const hashed = await bcrypt.hash(password, 8);
 
-    // Insert user into database
     await db.query(
       'INSERT INTO users (name, email, password, programme, role) VALUES (?, ?, ?, ?, ?)',
-      [name, email, hashedPassword, programme, role]
+      [name, email, hashed, programme, role]
     );
 
     res.status(201).json({ message: 'User registered successfully.' });
-  } catch (error) {
-    console.error('Registration error:', error.message);
+  } catch (err) {
+    console.error('Registration error:', err);
     res.status(500).json({ message: 'Internal server error.' });
   }
 };

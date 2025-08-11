@@ -94,3 +94,50 @@
     transform: translateY(0); 
   }
 }
+
+/* ===== New: actions row & email button ===== */
+.modal-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between; /* email left, preference buttons right */
+  align-items: center;
+  gap: 12px;
+}
+
+.contact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #5c2d91;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(75,35,118,.18);
+  transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
+}
+.contact-btn:hover { background: #45217e; }
+.contact-btn:active { transform: translateY(1px); }
+.contact-btn:focus-visible { outline: 3px solid rgba(92,45,145,.35); outline-offset: 2px; }
+
+.contact-missing {
+  color: #8b7aa8;
+  font-weight: 600;
+}
+
+.pref-area {
+  display: inline-flex;
+  gap: 10px;
+}
+
+/* Stack nicely on small screens */
+@media (max-width: 520px) {
+  .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pref-area {
+    justify-content: flex-end;
+  }
+}
