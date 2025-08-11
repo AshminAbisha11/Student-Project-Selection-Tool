@@ -1,24 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './loginPage.css';
 import axios from 'axios';
+import './loginPage.css';
 
-const LoginPage = () => {
+const API = 'http://localhost:5000';
+
+export default function LoginPage() {
   const navigate = useNavigate();
 
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
-
+  const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    setError('');
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   const handleSubmit = async (e) => {
@@ -32,39 +29,44 @@ const LoginPage = () => {
     }
 
     try {
-      // Clear old token (if any) before login
-      localStorage.removeItem('student');
+      setSubmitting(true);
+
+      // clear any old/stale data
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('student'); // legacy key from older versions
 
-      const res = await axios.post('http://localhost:5000/login', formData);
+      const { data } = await axios.post(`${API}/login`, {
+        email: formData.email,
+        password: formData.password,
+      });
 
-      if (res.data && res.data.user && res.data.token) {
-        const { user, token } = res.data;
-
-        // Save fresh data
-        localStorage.setItem('student', JSON.stringify(user));
-        localStorage.setItem('token', token);
-
-        setSuccess(res.data.message || 'Login successful');
-        console.log('Login success:', res.data);
-
-        // ✅ Redirect to dashboard
-        navigate('/student-dashboard');
-      } else {
+      if (!data?.token || !data?.user) {
         setError('Invalid response from server.');
+        return;
       }
+
+      // persist fresh auth
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      setSuccess(data.message || 'Login successful');
+
+      // route by role from backend
+      const role = String(data.user.role || '').trim().toLowerCase();
+      navigate(role === 'supervisor' ? '/supervisor-dashboard' : '/student-dashboard', {
+        replace: true,
+      });
     } catch (err) {
-      setError(err.response?.data?.message || 'Login failed');
+      const msg = err.response?.data?.message || 'Login failed';
+      setError(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleCreateAccount = () => {
-    navigate('/register');
-  };
-
-  const handleForgotPassword = () => {
-    navigate('/forgot-password');
-  };
+  const handleCreateAccount = () => navigate('/register');
+  const handleForgotPassword = () => navigate('/forgot-password');
 
   return (
     <div
@@ -81,13 +83,15 @@ const LoginPage = () => {
 
           <h2 className="login-heading">Log in to your account</h2>
 
-          <form onSubmit={handleSubmit} className="login-form">
+          <form onSubmit={handleSubmit} className="login-form" noValidate>
             <input
               type="email"
               name="email"
               placeholder="you@aston.ac.uk"
               value={formData.email}
               onChange={handleChange}
+              autoComplete="email"
+              disabled={submitting}
             />
 
             <input
@@ -96,13 +100,17 @@ const LoginPage = () => {
               placeholder="Password"
               value={formData.password}
               onChange={handleChange}
+              autoComplete="current-password"
+              disabled={submitting}
             />
 
             <p className="forgot-password" onClick={handleForgotPassword}>
               Forgot password?
             </p>
 
-            <button type="submit" className="login-button">Login</button>
+            <button type="submit" className="login-button" disabled={submitting}>
+              {submitting ? 'Signing in…' : 'Login'}
+            </button>
           </form>
 
           {error && <p className="error-msg">{error}</p>}
@@ -115,13 +123,11 @@ const LoginPage = () => {
           <p>
             Create your account to browse projects, submit your preferences, or propose your own!
           </p>
-          <button className="login-button" onClick={handleCreateAccount}>
+          <button className="login-button" onClick={handleCreateAccount} disabled={submitting}>
             Create Account
           </button>
         </div>
       </div>
     </div>
   );
-};
-
-export default LoginPage;
+}
