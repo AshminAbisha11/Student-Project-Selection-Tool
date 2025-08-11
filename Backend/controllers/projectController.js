@@ -212,3 +212,96 @@ exports.getProjectDetails = async (req, res) => {
   }
 };
 
+
+// POST /projects
+// Body: { title, description, topic?, keywords?, quota, full_description?, prerequisites? }
+exports.createProject = async (req, res) => {
+  try {
+    // must be logged in as a supervisor
+    if (!req.user || req.user.role !== 'supervisor') {
+      return res.status(403).json({ message: 'Only supervisors can create projects.' });
+    }
+
+    const {
+      title,
+      description,
+      topic = null,
+      keywords = null,
+      quota,
+      full_description = null, // goes into project_details
+      prerequisites = null     // goes into project_details
+    } = req.body || {};
+
+    // basic validation
+    const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+
+    if (!nonEmpty(title) || !nonEmpty(description)) {
+      return res.status(400).json({ message: 'Title and description are required.' });
+    }
+    const q = Number(quota);
+    if (!Number.isInteger(q) || q < 1) {
+      return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
+    }
+
+    const supervisor_id = req.user.user_id;     // from JWT
+    const supervisor_name = req.user.name || ''; // you still store name in projects
+
+    // Use a transaction because we touch two tables (projects + project_details)
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // insert project
+      const insertProjectSql = `
+        INSERT INTO projects
+          (title, description, supervisor_name, topic, keywords,
+           quota, spots_filled, status, supervisor_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'draft', ?)
+      `;
+      const [result] = await conn.query(insertProjectSql, [
+        title.trim(),
+        description.trim(),
+        supervisor_name,
+        topic ? String(topic).trim() : null,
+        keywords ? String(keywords).trim() : null,
+        q,
+        supervisor_id
+      ]);
+
+      const project_id = result.insertId;
+
+      // insert details (keep it even if nulls, or you can conditionally insert)
+      const insertDetailsSql = `
+        INSERT INTO project_details (project_id, full_description, prerequisites)
+        VALUES (?, ?, ?)
+      `;
+      await conn.query(insertDetailsSql, [
+        project_id,
+        full_description ? String(full_description).trim() : null,
+        prerequisites ? String(prerequisites).trim() : null
+      ]);
+
+      await conn.commit();
+
+      // return the created project
+      const [rows] = await conn.query(
+        `SELECT p.project_id, p.title, p.description, p.topic, p.keywords,
+                p.quota, p.spots_filled, p.status, p.created_at, p.updated_at,
+                p.supervisor_id, p.supervisor_name
+         FROM projects p
+         WHERE p.project_id = ?`,
+        [project_id]
+      );
+
+      return res.status(201).json({ message: 'Project created.', project: rows[0] });
+    } catch (txErr) {
+      await conn.rollback();
+      throw txErr;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('Create project error:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};

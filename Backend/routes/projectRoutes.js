@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
+const verifyToken = require('../middleware/authMiddleware'); 
+
 
 // All projects
 router.get('/', projectController.getAllProjects);
@@ -17,5 +19,11 @@ router.get('/filters', projectController.multiFilteredProjects);
 
 // Search by keyword
 router.get('/search', projectController.searchProjects);
+
+
+//create project by the supervisior 
+router.post('/create-project',verifyToken ,  projectController.createProject);
+
+
 
 module.exports = router;

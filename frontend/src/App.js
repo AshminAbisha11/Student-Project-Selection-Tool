@@ -15,6 +15,9 @@ import BrowseProjectsPage from './pages/browseProjectsPage';
 import MyPreferencesPage from './pages/myPreferencePage';
 import MyProposalPage from './pages/myProposalPage';
 
+// Supervisor Pages
+import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
+
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
 
@@ -38,6 +41,9 @@ function App() {
         <Route path="/browse-projects" element={<BrowseProjectsPage />} />
         <Route path="/my-preferences" element={<MyPreferencesPage />} />
         <Route path="/my-proposals" element={<MyProposalPage />} />
+
+        {/* Supervisor Routes */}
+        <Route path="/supervisor/create-project" element={<SupervisorCreateProjectPage />} /> {/* ⬅️ NEW */}
 
         {/* Help & Support */}
         <Route path="/help-support" element={<HelpSupportPage />} />
