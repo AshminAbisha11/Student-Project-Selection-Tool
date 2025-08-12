@@ -18,6 +18,18 @@ export default function LoginPage() {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
+  const safeNavigate = (to) => {
+    // try SPA nav first
+    requestAnimationFrame(() => {
+      try {
+        navigate(to, { replace: true });
+      } catch {
+        // absolute fallback
+        window.location.assign(to);
+      }
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -31,10 +43,10 @@ export default function LoginPage() {
     try {
       setSubmitting(true);
 
-      // clear any old/stale data
+      // clear any stale keys
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      localStorage.removeItem('student'); // legacy key from older versions
+      localStorage.removeItem('student'); // legacy key
 
       const { data } = await axios.post(`${API}/login`, {
         email: formData.email,
@@ -49,14 +61,16 @@ export default function LoginPage() {
       // persist fresh auth
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      // optional: some components like to read just the role
+      localStorage.setItem('role', String(data.user.role || '').toLowerCase());
 
       setSuccess(data.message || 'Login successful');
 
-      // route by role from backend
       const role = String(data.user.role || '').trim().toLowerCase();
-      navigate(role === 'supervisor' ? '/supervisor-dashboard' : '/student-dashboard', {
-        replace: true,
-      });
+      const target = role === 'supervisor' ? '/supervisor-dashboard' : '/student-dashboard';
+      console.debug('Login role:', role, '→ navigating to', target);
+
+      safeNavigate(target);
     } catch (err) {
       const msg = err.response?.data?.message || 'Login failed';
       setError(msg);
@@ -65,16 +79,12 @@ export default function LoginPage() {
     }
   };
 
-  const handleCreateAccount = () => navigate('/register');
-  const handleForgotPassword = () => navigate('/forgot-password');
-
   return (
     <div
       className="login-container"
       style={{ backgroundImage: "url('/assets/login_background.png')" }}
     >
       <div className="login-box">
-        {/* Left Panel */}
         <div className="login-left">
           <div className="header-title">
             <img src="/assets/aston_logo.png" alt="Aston University Logo" className="logo" />
@@ -93,7 +103,6 @@ export default function LoginPage() {
               autoComplete="email"
               disabled={submitting}
             />
-
             <input
               type="password"
               name="password"
@@ -104,7 +113,7 @@ export default function LoginPage() {
               disabled={submitting}
             />
 
-            <p className="forgot-password" onClick={handleForgotPassword}>
+            <p className="forgot-password" onClick={() => navigate('/forgot-password')}>
               Forgot password?
             </p>
 
@@ -117,13 +126,10 @@ export default function LoginPage() {
           {success && <p className="success-msg">{success}</p>}
         </div>
 
-        {/* Right Panel */}
         <div className="login-right">
           <h3>New to the Project Portal?</h3>
-          <p>
-            Create your account to browse projects, submit your preferences, or propose your own!
-          </p>
-          <button className="login-button" onClick={handleCreateAccount} disabled={submitting}>
+          <p>Create your account to browse projects, submit your preferences, or propose your own!</p>
+          <button className="login-button" onClick={() => navigate('/register')} disabled={submitting}>
             Create Account
           </button>
         </div>

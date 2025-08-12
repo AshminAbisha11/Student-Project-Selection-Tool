@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/sideBar';
 import ProfileDropdown from '../components/profileDropdown';
 
-const StudentDashboard = () => {
+const API = 'http://localhost:5000';
+
+export default function StudentDashboard() {
   const navigate = useNavigate();
 
   const [dashboardData, setDashboardData] = useState({
@@ -15,26 +17,35 @@ const StudentDashboard = () => {
       applicationStatus: 'Pending',
     },
   });
-
   const [showPrefModal, setShowPrefModal] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
   const [preferences, setPreferences] = useState([]);
   const [proposals, setProposals] = useState([]);
 
-  const student = JSON.parse(localStorage.getItem('student'));
+  // 🔑 read the unified auth keys
   const token = localStorage.getItem('token');
-  const studentId = student?.user_id;
-  const studentName = student?.name || 'Student';
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const userId = user?.user_id;
+  const studentName = user?.name || 'Student';
 
+  // ✅ gate: must be logged in *and* a student
+  useEffect(() => {
+    if (!token || !user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (String(user.role).toLowerCase() !== 'student') {
+      navigate('/supervisor-dashboard', { replace: true });
+    }
+  }, [navigate, token, user]);
+
+  // fetch dashboard stats
   useEffect(() => {
     const fetchDashboard = async () => {
-      if (!studentId || !token) {
-        navigate('/login');
-        return;
-      }
+      if (!userId || !token) return;
 
       try {
-        const res = await axios.get(`http://localhost:5000/dashboard/${studentId}`, {
+        const res = await axios.get(`${API}/dashboard/${userId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setDashboardData(res.data);
@@ -43,20 +54,20 @@ const StudentDashboard = () => {
         if (err.response?.status === 401 || err.response?.status === 403) {
           alert('Session expired. Please log in again.');
           localStorage.clear();
-          navigate('/login');
+          navigate('/login', { replace: true });
         }
       }
     };
 
     fetchDashboard();
-  }, [studentId, token, navigate]);
+  }, [userId, token, navigate]);
 
   const handleShowPreferences = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/preferences', {
+      const res = await axios.get(`${API}/preferences`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setPreferences(res.data);
+      setPreferences(Array.isArray(res.data) ? res.data : []);
       setShowPrefModal(true);
     } catch (err) {
       console.error('Error fetching preferences:', err);
@@ -66,10 +77,10 @@ const StudentDashboard = () => {
 
   const handleShowProposals = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/proposals/${studentId}`, {
+      const res = await axios.get(`${API}/proposals/${userId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setProposals(res.data);
+      setProposals(Array.isArray(res.data) ? res.data : []);
       setShowProposalModal(true);
     } catch (err) {
       console.error('Error fetching proposals:', err);
@@ -124,7 +135,7 @@ const StudentDashboard = () => {
             <h3 className="modal-title">Preferred Projects</h3>
             <div className="project-card-container">
               {preferences.map((pref, index) => (
-                <div className="project-card" key={pref.preference_id}>
+                <div className="project-card" key={pref.preference_id || index}>
                   <h4>{index + 1}. {pref.title}</h4>
                   <p className="project-description">{pref.description}</p>
                   <p className="supervisor-name">Supervisor: {pref.supervisor_name}</p>
@@ -146,13 +157,11 @@ const StudentDashboard = () => {
                 <div className="project-card" key={proposal.proposal_id || index}>
                   <h4>{index + 1}. {proposal.title}</h4>
                   <p className="project-description">{proposal.description}</p>
-                  {proposal.status && (
-                    <p className="supervisor-name">Status: {proposal.status}</p>
-                  )}
+                  {proposal.status && <p className="supervisor-name">Status: {proposal.status}</p>}
                   {proposal.file_path && (
                     <a
                       className="download-link"
-                      href={`http://localhost:5000/uploads/${proposal.file_path}`}
+                      href={`${API}/uploads/${proposal.file_path}`}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -167,6 +176,4 @@ const StudentDashboard = () => {
       )}
     </div>
   );
-};
-
-export default StudentDashboard;
+}
