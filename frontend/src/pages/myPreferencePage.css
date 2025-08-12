@@ -46,6 +46,7 @@
 .btn{
   padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer;
   border:none; line-height:1; box-shadow:0 4px 12px rgba(75,35,118,.12);
+  transition:filter .12s ease, transform .08s ease, background .12s ease, opacity .12s ease;
 }
 .btn:active{ transform:translateY(1px); }
 
@@ -61,6 +62,15 @@
   background:#e74c3c; color:#fff;
 }
 .btn-danger:hover{ filter:brightness(.95); }
+
+/* Disabled state for all buttons */
+.btn:disabled,
+.btn[disabled]{
+  opacity:.55;
+  cursor:not-allowed;
+  box-shadow:none;
+  filter:none;
+}
 
 /* ===== Grid ===== */
 .preferences-grid{
@@ -102,6 +112,39 @@
 /* footer buttons aligned across all cards */
 .actions{
   display:flex; gap:10px; margin-top:12px;
+}
+
+/* ===== "Have you contacted the supervisor?" field ===== */
+.contacted-field{
+  margin-top:8px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.contacted-field label{
+  font-size:13px;
+  font-weight:700;
+  color:#5c2d91;
+}
+
+.contacted-field select{
+  width:100%;
+  padding:10px 12px;
+  border-radius:10px;
+  border:2px solid #e8ddff;
+  background:#faf8ff;
+  color:#2c2c2c;
+  font-weight:600;
+  outline:none;
+  transition:border-color .12s ease, box-shadow .12s ease, background .12s ease;
+  appearance:none;             /* cleaner look */
+}
+
+.contacted-field select:focus{
+  border-color:#5c2d91;
+  box-shadow:0 0 0 4px rgba(92,45,145,.12);
+  background:#fff;
 }
 
 /* ===== Empty slot ===== */

@@ -2,19 +2,17 @@ const express = require('express');
 const router = express.Router();
 const preferenceController = require('../controllers/preferenceController');
 const verifyToken = require('../middleware/authMiddleware');
+const submissionWindow = require('../middleware/submissionWindow'); // ⬅️ NEW
 
 router.use(verifyToken);
 
-// GET all preferences for a student
+// ----- Read (allowed always) -----
 router.get('/', preferenceController.getPreferencesByStudent);
 
-// POST a new preference
-router.post('/', preferenceController.addPreference);
-
-// PUT to update preference order
-router.put('/', preferenceController.updatePreferenceOrder);
-
-// DELETE a preference
-router.delete('/:preferenceId', preferenceController.deletePreference);
+// ----- Writes (blocked after deadline by submissionWindow) -----
+router.post('/', submissionWindow, preferenceController.addPreference);
+router.put('/', submissionWindow, preferenceController.updatePreferenceOrder);
+router.patch('/contacted', submissionWindow, preferenceController.updateContactedSupervisor);
+router.delete('/:preferenceId', submissionWindow, preferenceController.deletePreference);
 
 module.exports = router;
