@@ -22,6 +22,7 @@ const changePasswordRoutes = require('./routes/changePasswordRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const allocationRoutes = require('./routes/allocationRoutes');
 const supervisorDashboardRoutes = require('./routes/supervisorDashboardRoutes');
+const cycleRoutes = require('./routes/cycleRoutes');
 
 
 
@@ -48,6 +49,7 @@ app.use('/change-password', changePasswordRoutes);
 app.use('/feedback', feedbackRoutes);
 app.use('/allocations', allocationRoutes);
 app.use('/supervisor', supervisorDashboardRoutes);
+app.use('/cycle', cycleRoutes);
 
 // Start server
 const port = process.env.PORT || 5000;
