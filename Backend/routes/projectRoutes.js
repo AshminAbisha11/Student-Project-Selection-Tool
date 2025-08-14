@@ -39,4 +39,8 @@ router.get('/:projectId', verifyToken, projectController.getMyProjectById);
 // Update one supervisor-owned project (from Edit modal)
 router.patch('/:projectId', verifyToken, projectController.updateMyProject);
 
+// Delete one supervisor-owned project
+router.delete('/:projectId', verifyToken, projectController.deleteMyProject);
+
+
 module.exports = router;

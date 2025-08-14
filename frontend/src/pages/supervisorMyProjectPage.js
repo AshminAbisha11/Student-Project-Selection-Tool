@@ -3,7 +3,7 @@ import { useNavigate, useLocation, NavLink } from 'react-router-dom';
 import './supervisorMyProjectPage.css';
 import SupervisorNav from '../components/supervisorNav';
 import SupervisorHeader from '../components/supervisorHeader';
-import SupervisorProjectEditModal from '../components/supervisorProjectEditModal'; // ✅
+import SupervisorProjectEditModal from '../components/supervisorProjectEditModal';
 
 const API = 'http://localhost:5000';
 
@@ -21,7 +21,7 @@ const MyProjectsPage = () => {
   const [projects, setProjects]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
-  const [editId, setEditId]       = useState(null);         // ✅
+  const [editId, setEditId]       = useState(null);
 
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -60,7 +60,25 @@ const MyProjectsPage = () => {
 
   useEffect(() => { fetchMyProjects(); /* eslint-disable-next-line */ }, [showArchived]);
 
-  const onDelete = async () => alert('Delete not implemented yet');
+  // 🔴 Delete implementation
+  const onDelete = async (projectId) => {
+    const ok = window.confirm('Delete this project permanently? This cannot be undone.');
+    if (!ok) return;
+    try {
+      const res = await fetch(`${API}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`Delete failed: ${res.status} ${t}`);
+      }
+      await fetchMyProjects();
+    } catch (e) {
+      console.error(e);
+      alert(e.message || 'Delete failed');
+    }
+  };
 
   const archiveProject = async (projectId) => {
     try {
@@ -169,7 +187,8 @@ const MyProjectsPage = () => {
                             {!showArchived ? (
                               <>
                                 <button className="btn btn-outline" onClick={() => setEditId(p.project_id)}>Edit</button>
-                                <button className="btn btn-danger" onClick={onDelete}>Delete</button>
+                                {/* 🔴 pass the id here */}
+                                <button className="btn btn-danger" onClick={() => onDelete(p.project_id)}>Delete</button>
                                 <button className="btn btn-archive" onClick={() => archiveProject(p.project_id)} title="Move to archived">Archive</button>
                               </>
                             ) : (

@@ -508,3 +508,63 @@ exports.unarchiveProject = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+// === Delete a supervisor-owned project ===
+exports.deleteMyProject = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  const { projectId } = req.params;
+  const id = Number(projectId);
+
+  if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid projectId' });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Must belong to this supervisor
+    const [[own]] = await conn.query(
+      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [id, supervisorId]
+    );
+    if (!own) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Project not found or not yours' });
+    }
+
+    // Block delete if there are allocations (you can relax this if you want)
+    const [[alloc]] = await conn.query(
+      `SELECT COUNT(*) AS c FROM allocations WHERE project_id = ?`,
+      [id]
+    );
+    if ((alloc?.c || 0) > 0) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'Cannot delete: project has allocated students' });
+    }
+
+    // Clean up details (or rely on ON DELETE CASCADE if set)
+    await conn.query(`DELETE FROM project_details WHERE project_id = ?`, [id]);
+    // If you have proposals/applications tables, delete those here too (or use FK cascade)
+
+    const [del] = await conn.query(
+      `DELETE FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [id, supervisorId]
+    );
+    if (!del.affectedRows) {
+      await conn.rollback();
+      return res.status(500).json({ message: 'Delete failed' });
+    }
+
+    await conn.commit();
+    return res.json({ message: 'Project deleted' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('deleteMyProject error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  } finally {
+    conn.release();
+  }
+};
