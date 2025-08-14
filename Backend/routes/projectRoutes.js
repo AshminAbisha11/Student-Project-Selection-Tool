@@ -9,7 +9,7 @@ const verifyToken = require('../middleware/authMiddleware');
 // All (non-archived) projects
 router.get('/', projectController.getAllProjects);
 
-// Full details for one project
+// Full details for one project (public view; hides archived)
 router.get('/details/:projectId', projectController.getProjectDetails);
 
 // Filters
@@ -26,11 +26,17 @@ router.get('/search', projectController.searchProjects);
 // Create a project
 router.post('/create-project', verifyToken, projectController.createProject);
 
-// My projects
+// My projects (use ?archived=0|1|all)
 router.get('/my', verifyToken, projectController.getMyProjects);
 
-// Archive / Unarchive my project
+// Archive / Unarchive my project (keep these BEFORE the generic :projectId routes)
 router.patch('/:projectId/archive', verifyToken, projectController.archiveProject);
 router.patch('/:projectId/unarchive', verifyToken, projectController.unarchiveProject);
+
+// Fetch one supervisor-owned project (for Edit modal)
+router.get('/:projectId', verifyToken, projectController.getMyProjectById);
+
+// Update one supervisor-owned project (from Edit modal)
+router.patch('/:projectId', verifyToken, projectController.updateMyProject);
 
 module.exports = router;

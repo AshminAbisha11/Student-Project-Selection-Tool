@@ -38,7 +38,7 @@ exports.getAllProjects = async (_req, res) => {
   }
 };
 
-// 2) Full project details by ID
+// 2) Full project details by ID (public view; hides archived)
 exports.getProjectDetails = async (req, res) => {
   const { projectId } = req.params;
   const id = Number(projectId);
@@ -66,7 +66,7 @@ exports.getProjectDetails = async (req, res) => {
   }
 };
 
-// 3) Filter by supervisor
+// 3) Filter by supervisor (non-archived)
 exports.filterBySupervisor = async (req, res) => {
   const { supervisor } = req.params;
   try {
@@ -88,7 +88,7 @@ exports.filterBySupervisor = async (req, res) => {
   }
 };
 
-// 4) Filter by topic
+// 4) Filter by topic (non-archived)
 exports.filterByTopic = async (req, res) => {
   const { topic } = req.params;
   try {
@@ -110,7 +110,7 @@ exports.filterByTopic = async (req, res) => {
   }
 };
 
-// 5) Filter by keyword (query param: keyword=)
+// 5) Filter by keyword in keywords field (non-archived)
 exports.filterByKeyword = async (req, res) => {
   const { keyword } = req.query;
   try {
@@ -132,7 +132,7 @@ exports.filterByKeyword = async (req, res) => {
   }
 };
 
-// 6) Multi-filter (supervisor, topic, keyword)
+// 6) Multi-filter (non-archived)
 exports.multiFilteredProjects = async (req, res) => {
   const { supervisor, topic, keyword } = req.query;
   const clauses = ['p.is_archived = 0'];
@@ -158,7 +158,7 @@ exports.multiFilteredProjects = async (req, res) => {
   }
 };
 
-// 7) Search projects by title or description
+// 7) Search by title/description (non-archived)
 exports.searchProjects = async (req, res) => {
   const { query: searchTerm } = req.query;
   if (!searchTerm) {
@@ -170,7 +170,7 @@ exports.searchProjects = async (req, res) => {
         p.*, GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining
       FROM projects p
       WHERE (p.title LIKE ? OR p.description LIKE ?)
-      AND p.is_archived = 0
+        AND p.is_archived = 0
       ORDER BY p.created_at DESC, p.project_id DESC
     `, [`%${searchTerm}%`, `%${searchTerm}%`]);
 
@@ -185,6 +185,8 @@ exports.searchProjects = async (req, res) => {
  * SUPERVISOR AREA
  * ====================================================== */
 
+// My projects (owned by logged-in supervisor)
+// ?archived=1 -> archived only; ?archived=0 -> active only (default); ?archived=all -> both
 exports.getMyProjects = async (req, res) => {
   const supervisorId = req.user?.user_id;
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
@@ -228,6 +230,133 @@ exports.getMyProjects = async (req, res) => {
   } catch (err) {
     console.error('getMyProjects error:', err);
     res.status(500).json({ message: 'Database error' });
+  }
+};
+
+// === Fetch a single supervisor-owned project (with details) ===
+exports.getMyProjectById = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  const { projectId } = req.params;
+  const id = Number(projectId);
+  if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid projectId' });
+
+  try {
+    const [[own]] = await db.query(
+      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [id, supervisorId]
+    );
+    if (!own) return res.status(404).json({ message: 'Project not found or not yours' });
+
+    const [[row]] = await db.query(`
+      SELECT 
+        p.project_id, p.title, p.description, p.topic, p.keywords, p.quota,
+        p.approval_status, p.is_student_proposal, p.is_archived,
+        p.created_at, p.updated_at,
+        d.full_description, d.prerequisites
+      FROM projects p
+      LEFT JOIN project_details d ON d.project_id = p.project_id
+      WHERE p.project_id = ?`,
+      [id]
+    );
+
+    return res.json(row || null);
+  } catch (err) {
+    console.error('getMyProjectById error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// === Update a project (main fields + details) ===
+exports.updateMyProject = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  const { projectId } = req.params;
+  const id = Number(projectId);
+  if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid projectId' });
+
+  const {
+    title,
+    description,
+    topic = null,
+    keywords = null,
+    quota,
+    full_description = null,
+    prerequisites = null,
+  } = req.body || {};
+
+  const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+  if (!nonEmpty(title) || !nonEmpty(description)) {
+    return res.status(400).json({ message: 'Title and description are required.' });
+  }
+  const q = Number(quota);
+  if (!Number.isInteger(q) || q < 1) {
+    return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
+  }
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [[own]] = await conn.query(
+      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [id, supervisorId]
+    );
+    if (!own) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Project not found or not yours' });
+    }
+
+    // update main table
+    await conn.query(
+      `UPDATE projects
+       SET title = ?, description = ?, topic = ?, keywords = ?, quota = ?, updated_at = NOW()
+       WHERE project_id = ?`,
+      [
+        String(title).trim(),
+        String(description).trim(),
+        topic ? String(topic).trim() : null,
+        keywords ? String(keywords).trim() : null,
+        q,
+        id
+      ]
+    );
+
+    // upsert project_details
+    await conn.query(
+      `INSERT INTO project_details (project_id, full_description, prerequisites)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         full_description = VALUES(full_description),
+         prerequisites    = VALUES(prerequisites)`,
+      [
+        id,
+        full_description ? String(full_description).trim() : null,
+        prerequisites ? String(prerequisites).trim() : null,
+      ]
+    );
+
+    await conn.commit();
+
+    const [[updated]] = await conn.query(
+      `SELECT 
+        p.project_id, p.title, p.description, p.topic, p.keywords, p.quota,
+        p.approval_status, p.is_student_proposal, p.is_archived,
+        p.created_at, p.updated_at,
+        d.full_description, d.prerequisites
+       FROM projects p
+       LEFT JOIN project_details d ON d.project_id = p.project_id
+       WHERE p.project_id = ?`,
+      [id]
+    );
+
+    return res.json({ message: 'Project updated.', project: updated });
+  } catch (err) {
+    await conn.rollback();
+    console.error('updateMyProject error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  } finally {
+    conn.release();
   }
 };
 
@@ -279,7 +408,7 @@ exports.createProject = async (req, res) => {
         supervisor_name,
         topic ? String(topic).trim() : null,
         keywords ? String(keywords).trim() : null,
-        q,
+        Number(quota),
         supervisor_id,
       ]);
 
