@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './supervisorMyProjectPage.css';            // reuse the same CSS
+import './supervisorMyProjectPage.css';
 import SideBar from '../components/sideBar';
 import HeaderBar from '../components/headerBar';
 
@@ -24,6 +24,18 @@ export default function ArchivedProjectsPage() {
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const user  = JSON.parse(localStorage.getItem('user') || 'null');
+
+  // Simple guard: require auth + supervisor
+  useEffect(() => {
+    if (!token || !user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (String(user.role).toLowerCase() !== 'supervisor') {
+      navigate('/student-dashboard', { replace: true });
+    }
+  }, [navigate, token, user]);
 
   const authHeaders = useMemo(
     () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }),
@@ -31,15 +43,26 @@ export default function ArchivedProjectsPage() {
   );
 
   const fetchArchived = async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
-      const res = await fetch(`${API}/projects/my`, { headers: authHeaders });
+      // ⬇️ ask backend specifically for archived
+      const res = await fetch(`${API}/projects/my?archived=1`, { headers: authHeaders });
+      if (res.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
       if (!res.ok) {
         const t = await res.text();
         throw new Error(`Failed (${res.status}): ${t}`);
       }
       const data = await res.json();
-      const archived = Array.isArray(data) ? data.filter(p => Boolean(p.is_archived)) : [];
+
+      // ⬇️ make sure we only keep archived (in case backend ever returns mixed)
+      const archived = Array.isArray(data)
+        ? data.filter(p => Number(p.is_archived) === 1)
+        : [];
+
       setProjects(archived);
     } catch (e) {
       console.error(e);
@@ -57,11 +80,15 @@ export default function ArchivedProjectsPage() {
         method: 'PATCH',
         headers: authHeaders,
       });
+      if (res.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
       if (!res.ok) {
         const t = await res.text();
         throw new Error(`Unarchive failed: ${res.status} ${t}`);
       }
-      await fetchArchived();
+      await fetchArchived(); // refresh list after unarchive
     } catch (e) {
       console.error(e);
       alert(e.message || 'Unarchive failed');
@@ -72,7 +99,7 @@ export default function ArchivedProjectsPage() {
     <div className="empty-state">
       <h3>No archived projects</h3>
       <p>You haven’t archived any projects yet.</p>
-      <button className="btn btn-outline" onClick={() => navigate('/my-projects')}>
+      <button className="btn btn-outline" onClick={() => navigate('/supervisor/my-projects')}>
         Go to My Projects
       </button>
     </div>
@@ -87,7 +114,7 @@ export default function ArchivedProjectsPage() {
         <div className="page-inner">
           {/* simple left-aligned header controls */}
           <div className="myproj-controls">
-            <button className="btn btn-outline" onClick={() => navigate('/my-projects')}>
+            <button className="btn btn-outline" onClick={() => navigate('/supervisor/my-projects')}>
               ← Back to My Projects
             </button>
             <button className="btn btn-outline" onClick={fetchArchived}>
@@ -104,7 +131,10 @@ export default function ArchivedProjectsPage() {
           ) : (
             <div className="projects-grid">
               {projects.map((p) => {
-                const remaining = Math.max(0, Number(p.quota ?? 0) - Number(p.spots_filled ?? 0));
+                const remaining = Math.max(
+                  0,
+                  Number(p.quota ?? 0) - Number((p.allocated_count ?? p.spots_filled) ?? 0)
+                );
                 const full = remaining === 0;
 
                 return (
@@ -131,7 +161,7 @@ export default function ArchivedProjectsPage() {
                       </div>
                       <div className="numbers">
                         <span>Quota: <strong>{p.quota}</strong></span>
-                        <span>Allocated: <strong>{p.allocated_count ?? p.spots_filled}</strong></span>
+                        <span>Allocated: <strong>{p.allocated_count ?? p.spots_filled ?? 0}</strong></span>
                       </div>
                     </div>
 

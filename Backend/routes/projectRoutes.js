@@ -1,3 +1,4 @@
+// routes/projectRoutes.js
 const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
@@ -25,7 +26,7 @@ router.get('/search', projectController.searchProjects);
 // Create a project
 router.post('/create-project', verifyToken, projectController.createProject);
 
-// My projects (active by default; use ?archived=1 for archived)
+// My projects
 router.get('/my', verifyToken, projectController.getMyProjects);
 
 // Archive / Unarchive my project

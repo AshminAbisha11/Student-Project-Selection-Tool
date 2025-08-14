@@ -1,5 +1,6 @@
+// supervisorMyProjectPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, NavLink } from 'react-router-dom';
 import './supervisorMyProjectPage.css';
 import SupervisorNav from '../components/supervisorNav';
 import SupervisorHeader from '../components/supervisorHeader';
@@ -17,15 +18,24 @@ const chipClass = (status) => {
 const formatDate = (d) => (d ? new Date(d).toLocaleString() : '');
 
 const MyProjectsPage = () => {
-  const [projects, setProjects]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [showArchived, setShowArchived] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState('');
 
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const isArchivedRoute = location.pathname.endsWith('/archived');
+  const [showArchived, setShowArchived] = useState(isArchivedRoute);
+
+  // keep state in sync with URL changes (back/forward)
+  useEffect(() => {
+    setShowArchived(location.pathname.endsWith('/archived'));
+  }, [location.pathname]);
+
   const token = localStorage.getItem('token');
   const user  = JSON.parse(localStorage.getItem('user') || 'null');
 
+  // auth guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -48,16 +58,17 @@ const MyProjectsPage = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API}/projects/my`, { headers: authHeaders });
+      // ⬅ fetch exactly what the tab needs
+      const res = await fetch(
+        `${API}/projects/my?archived=${showArchived ? 1 : 0}`,
+        { headers: authHeaders }
+      );
       if (!res.ok) {
         const t = await res.text();
         throw new Error(`Failed (${res.status}): ${t}`);
       }
       const data = await res.json();
-      const list = Array.isArray(data)
-        ? data.filter((p) => Boolean(p.is_archived) === showArchived)
-        : [];
-      setProjects(list);
+      setProjects(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
       setError(e.message || 'Failed to load projects');
@@ -136,36 +147,46 @@ const MyProjectsPage = () => {
         backgroundPosition: 'center'
       }}
     >
-      {/* Full-width sticky header at the very top */}
       <div className="topbar-wrap">
         <SupervisorHeader />
       </div>
 
-      {/* Grid under the header: sidebar + main content */}
       <div className="main-grid">
         <SupervisorNav />
 
         <div className="content-area">
-          {/* Big white container panel like the dashboard */}
           <section className="myproj-panel">
             <div className="page-inner">
-              {/* Controls row — left aligned */}
-              <div className="myproj-controls">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!showArchived}
-                    onChange={(e) => setShowArchived(!e.target.checked)}
-                  />
-                  {' '}Active
-                </label>
 
-                <button className="btn btn-outline" onClick={fetchMyProjects}>
-                  Refresh
-                </button>
-                <button className="btn btn-primary" onClick={onCreate}>
-                  Create Project
-                </button>
+              {/* === Tabs + actions === */}
+              <div className="myproj-controls">
+                <div className="seg-tabs">
+                  <NavLink
+                    to="/supervisor/my-projects"
+                    className={({ isActive }) => `seg-btn ${!showArchived && isActive ? 'is-active' : ''}`}
+                    onClick={() => setShowArchived(false)}
+                  >
+                    Active
+                  </NavLink>
+                  <NavLink
+                    to="/supervisor/my-projects/archived"
+                    className={({ isActive }) => `seg-btn ${showArchived && isActive ? 'is-active' : ''}`}
+                    onClick={() => setShowArchived(true)}
+                  >
+                    Archived
+                  </NavLink>
+                </div>
+
+                <div className="controls-right">
+                  <button className="btn btn-outline" onClick={fetchMyProjects}>
+                    Refresh
+                  </button>
+                  {!showArchived && (
+                    <button className="btn btn-primary" onClick={onCreate}>
+                      Create Project
+                    </button>
+                  )}
+                </div>
               </div>
 
               {error && <div className="alert alert-error">{error}</div>}
@@ -177,10 +198,9 @@ const MyProjectsPage = () => {
               ) : (
                 <div className="projects-grid">
                   {projects.map((p) => {
-                    const remaining = Math.max(
-                      0,
-                      Number(p.quota ?? 0) - Number(p.spots_filled ?? 0)
-                    );
+                    const allocated = Number(p.allocated_count ?? p.spots_filled ?? 0);
+                    const quota = Number(p.quota ?? 0);
+                    const remaining = Math.max(0, quota - allocated);
                     const full = remaining === 0;
 
                     return (
@@ -192,7 +212,7 @@ const MyProjectsPage = () => {
                           {p.is_student_proposal ? (
                             <span className="chip chip--ghost">Student Proposal</span>
                           ) : null}
-                          {p.is_archived ? (
+                          {Number(p.is_archived) === 1 ? (
                             <span className="chip chip--archived">Archived</span>
                           ) : null}
                         </div>
@@ -210,8 +230,8 @@ const MyProjectsPage = () => {
                             {full ? 'Full' : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
                           </div>
                           <div className="numbers">
-                            <span>Quota: <strong>{p.quota}</strong></span>
-                            <span>Allocated: <strong>{p.allocated_count ?? p.spots_filled}</strong></span>
+                            <span>Quota: <strong>{quota}</strong></span>
+                            <span>Allocated: <strong>{allocated}</strong></span>
                           </div>
                         </div>
 
@@ -227,12 +247,20 @@ const MyProjectsPage = () => {
                               <>
                                 <button className="btn btn-outline" onClick={onEdit}>Edit</button>
                                 <button className="btn btn-danger" onClick={onDelete}>Delete</button>
-                                <button className="btn btn-archive" onClick={() => archiveProject(p.project_id)} title="Move to archived">
+                                <button
+                                  className="btn btn-archive"
+                                  onClick={() => archiveProject(p.project_id)}
+                                  title="Move to archived"
+                                >
                                   Archive
                                 </button>
                               </>
                             ) : (
-                              <button className="btn btn-outline" onClick={() => unarchiveProject(p.project_id)} title="Restore to active">
+                              <button
+                                className="btn btn-outline"
+                                onClick={() => unarchiveProject(p.project_id)}
+                                title="Restore to active"
+                              >
                                 Unarchive
                               </button>
                             )}
