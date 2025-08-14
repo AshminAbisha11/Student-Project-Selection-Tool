@@ -1,0 +1,59 @@
+/* sidebar container */
+.sv-sidebar{
+  width: 280px;
+  min-height: 100vh;
+  padding: 20px 16px;
+  box-sizing: border-box;
+  background: #fff;
+  border-right: 2px solid rgba(123, 44, 191, 0.12);
+  position: sticky;
+  top: 0;
+}
+
+/* logo */
+.sv-logo{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 18px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  cursor: pointer;
+}
+.sv-logo img{ height: 28px; }
+
+/* nav */
+.sv-nav{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.sv-link{
+  display: block;
+  padding: 12px 14px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-weight: 600;
+  color: #4b3869;
+  background: #f6f1ff;
+  transition: transform .05s ease, background .15s ease;
+}
+.sv-link:hover{ background: #efe6ff; transform: translateY(-1px); }
+
+/* active route */
+.sv-link.active{
+  background: #7b2cbf;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(123,44,191,.25);
+}
+
+/* logout */
+.sv-link--danger{
+  background: #fff3f3;
+  color: #b42318;
+}
+.sv-link--danger.active,
+.sv-link--danger:hover{
+  background: #ffe7e7;
+}

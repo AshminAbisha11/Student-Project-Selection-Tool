@@ -1,7 +1,9 @@
+// src/pages/SupervisorDashboardPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ProfileDropdown from '../components/profileDropdown';
+import SupervisorNav from '../components/supervisorNav';
 import './supervisorDashboardPage.css';
 
 const API = 'http://localhost:5000';
@@ -33,6 +35,7 @@ export default function SupervisorDashboardPage() {
   const user = JSON.parse(localStorage.getItem('user') || 'null');
   const name = useMemo(() => user?.name || getNameFromToken() || 'Supervisor', [user]);
 
+  // auth + role guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -43,6 +46,7 @@ export default function SupervisorDashboardPage() {
     }
   }, [navigate, token, user]);
 
+  // load dashboard overview
   useEffect(() => {
     let mounted = true;
     async function load() {
@@ -67,7 +71,7 @@ export default function SupervisorDashboardPage() {
       }
     }
     if (token && user) load();
-    return () => (mounted = false);
+    return () => { mounted = false; };
   }, [token, user, navigate]);
 
   return (
@@ -75,32 +79,13 @@ export default function SupervisorDashboardPage() {
       className="dashboard-container"
       style={{ backgroundImage: "url('/assets/login_background.png')" }}
     >
-      {/* Left rail */}
-      <aside className="sd-sidebar">
-        <div className="sd-logo">
-          <img src="/assets/aston_logo.png" alt="Aston" />
-        </div>
+      {/* Supervisor sidebar */}
+      <SupervisorNav />
 
-        <nav className="sd-nav">
-          <button className="sd-link" onClick={() => navigate('/supervisor/allocated')}>
-            Allocated Students
-          </button>
-          <button className="sd-link" onClick={() => navigate('/supervisor/projects')}>
-            My Projects
-          </button>
-          <button className="sd-link" onClick={() => navigate('/supervisor/proposals')}>
-            Received Proposals
-          </button>
-          <button className="sd-link danger" onClick={() => navigate('/logout')}>
-            Logout
-          </button>
-        </nav>
-      </aside>
-
-      {/* Main pane — same layout classes as student */}
+      {/* Main pane */}
       <div className="dashboard-main">
         <header className="dashboard-header">
-          <h2>Supervisor Project Portal</h2> {/* <- updated title */}
+          <h2>Supervisor Project Portal</h2>
           <ProfileDropdown />
         </header>
 
@@ -112,12 +97,13 @@ export default function SupervisorDashboardPage() {
         <div className="dashboard-cards">
           <div
             className="dashboard-card"
-            onClick={() => navigate('/supervisor/projects')}
+            onClick={() => navigate('/my-projects')}
             style={{ cursor: 'pointer' }}
           >
             <h4>{loading ? '—' : overview.projects}</h4>
             <p>Projects Supervised</p>
           </div>
+
           <div
             className="dashboard-card"
             onClick={() => navigate('/supervisor/proposals')}
@@ -126,6 +112,7 @@ export default function SupervisorDashboardPage() {
             <h4>{loading ? '—' : overview.pendingProposals}</h4>
             <p>Proposals Pending Review</p>
           </div>
+
           <div
             className="dashboard-card"
             onClick={() => navigate('/supervisor/allocated')}
@@ -141,6 +128,7 @@ export default function SupervisorDashboardPage() {
           <button onClick={() => navigate('/supervisor/create-project')}>Add new Project</button>
           <button onClick={() => navigate('/supervisor/proposals')}>Review Proposals</button>
           <button onClick={() => navigate('/supervisor/allocated')}>View Allocated Students</button>
+          <button onClick={() => navigate('/my-projects')}>My Projects</button>
         </div>
       </div>
     </div>

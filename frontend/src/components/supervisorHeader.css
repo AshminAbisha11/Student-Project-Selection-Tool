@@ -1,0 +1,62 @@
+/* full-width bar visuals */
+.sv-header{
+  background: linear-gradient(90deg,#5c2d91,#5c2d91 28%, #4a34b0 70%);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+  height:64px;
+  border-radius:0;                 /* keep edge-to-edge */
+  padding:0 32px;                  /* aligns with grid gutters */
+  box-sizing:border-box;
+}
+
+/* left section with logo + title */
+.sv-header__left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.sv-header__logo{
+  height:28px;                     /* tweak to your asset */
+  width:auto;
+  display:block;
+}
+
+.sv-header__title{
+  margin:0;
+  font-size:18px;
+  font-weight:800;
+  letter-spacing:.2px;
+}
+
+/* right controls */
+.sv-header__right{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.sv-search{
+  background:#fff;
+  border:none;
+  outline:none;
+  border-radius:999px;
+  padding:8px 14px;
+  min-width:240px;
+}
+
+.sv-search-btn,
+.sv-profile-btn{
+  background:#e6d6fa;
+  border:none;
+  border-radius:999px;
+  height:36px;
+  width:36px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+}
