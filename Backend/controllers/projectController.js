@@ -1,40 +1,57 @@
+// controllers/projectController.js
 const db = require('../config/db');
 const stringSimilarity = require('string-similarity');
 
-// Utility to format quota display (e.g., "2 slots left")
-const formatQuota = (remaining) => {
-  return remaining > 0 ? `${remaining} slot${remaining > 1 ? 's' : ''} left` : 'Full';
+// helper for UI quota badges
+const formatQuota = (remaining) =>
+  remaining > 0 ? `${remaining} slot${remaining > 1 ? 's' : ''} left` : 'Full';
+
+const parseBool = (v, def = false) => {
+  if (v === undefined || v === null) return def;
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
 };
 
-// 1. Get all projects
-exports.getAllProjects = async (req, res) => {
+/* ========================================================
+ * PUBLIC / BROWSE  (archived hidden by default)
+ * ====================================================== */
+
+// 1) Get all projects (non-archived)
+exports.getAllProjects = async (_req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT *, (quota - spots_filled) AS quota_remaining 
-      FROM projects
+      SELECT
+        p.project_id, p.title, p.description, p.topic, p.keywords,
+        p.supervisor_id, p.supervisor_name,
+        p.quota, p.spots_filled, (p.quota - p.spots_filled) AS quota_remaining,
+        p.approval_status, p.is_student_proposal,
+        p.created_at, p.updated_at
+      FROM projects p
+      WHERE p.is_archived = 0
+      ORDER BY p.created_at DESC, p.project_id DESC
     `);
-    res.status(200).json(rows);
+    res.status(200).json(rows ?? []);
   } catch (error) {
     console.error('Error fetching all projects:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-// 2. Filter by supervisor
+// 2) Filter by supervisor name (non-archived)
 exports.filterBySupervisor = async (req, res) => {
   const { supervisor } = req.params;
-
   try {
     const [rows] = await db.execute(`
-      SELECT *, (quota - spots_filled) AS quota_remaining 
-      FROM projects 
-      WHERE supervisor_name = ?
+      SELECT
+        p.*, (p.quota - p.spots_filled) AS quota_remaining
+      FROM projects p
+      WHERE p.supervisor_name = ? AND p.is_archived = 0
+      ORDER BY p.created_at DESC, p.project_id DESC
     `, [supervisor]);
 
-    if (rows.length === 0) {
+    if (!rows.length) {
       return res.status(404).json({ message: `No projects found for supervisor: ${supervisor}` });
     }
-
     res.status(200).json({ projects: rows });
   } catch (error) {
     console.error('Error filtering by supervisor:', error);
@@ -42,21 +59,21 @@ exports.filterBySupervisor = async (req, res) => {
   }
 };
 
-// 3. Filter by topic
+// 3) Filter by topic (non-archived)
 exports.filterByTopic = async (req, res) => {
   const { topic } = req.params;
-
   try {
     const [rows] = await db.execute(`
-      SELECT *, (quota - spots_filled) AS quota_remaining 
-      FROM projects 
-      WHERE topic = ?
+      SELECT
+        p.*, (p.quota - p.spots_filled) AS quota_remaining
+      FROM projects p
+      WHERE p.topic = ? AND p.is_archived = 0
+      ORDER BY p.created_at DESC, p.project_id DESC
     `, [topic]);
 
-    if (rows.length === 0) {
+    if (!rows.length) {
       return res.status(404).json({ message: `No projects found for topic: ${topic}` });
     }
-
     res.status(200).json({ projects: rows });
   } catch (error) {
     console.error('Error filtering by topic:', error);
@@ -64,21 +81,21 @@ exports.filterByTopic = async (req, res) => {
   }
 };
 
-// 4. Filter by keyword
+// 4) Filter by keyword (title/description) (non-archived)
 exports.filterByKeyword = async (req, res) => {
   const { keyword } = req.query;
-
   try {
     const [rows] = await db.execute(`
-      SELECT *, (quota - spots_filled) AS quota_remaining 
-      FROM projects 
-      WHERE title LIKE ? OR description LIKE ?
+      SELECT
+        p.*, (p.quota - p.spots_filled) AS quota_remaining
+      FROM projects p
+      WHERE (p.title LIKE ? OR p.description LIKE ?) AND p.is_archived = 0
+      ORDER BY p.created_at DESC, p.project_id DESC
     `, [`%${keyword}%`, `%${keyword}%`]);
 
-    if (rows.length === 0) {
+    if (!rows.length) {
       return res.status(404).json({ message: `No projects found for keyword: ${keyword}` });
     }
-
     res.status(200).json({ projects: rows });
   } catch (error) {
     console.error('Error filtering by keyword:', error);
@@ -86,41 +103,30 @@ exports.filterByKeyword = async (req, res) => {
   }
 };
 
-// 5. Multi-filtered project
+// 5) Multi-filter (supervisor, topic, keyword) (non-archived)
 exports.multiFilteredProjects = async (req, res) => {
   const { supervisor, topic, keyword } = req.query;
 
-  let query = `
-    SELECT *, (quota - spots_filled) AS quota_remaining 
-    FROM projects
+  const where = ['p.is_archived = 0'];
+  const params = [];
+
+  if (supervisor) { where.push('p.supervisor_name = ?'); params.push(supervisor); }
+  if (topic)      { where.push('p.topic = ?');            params.push(topic); }
+  if (keyword)    { where.push('(p.title LIKE ? OR p.description LIKE ?)'); params.push(`%${keyword}%`, `%${keyword}%`); }
+
+  const sql = `
+    SELECT
+      p.*, (p.quota - p.spots_filled) AS quota_remaining
+    FROM projects p
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY p.created_at DESC, p.project_id DESC
   `;
-  let queryParams = [];
-  let whereAdded = false;
-
-  if (supervisor) {
-    query += whereAdded ? ` AND supervisor_name = ?` : ` WHERE supervisor_name = ?`;
-    queryParams.push(supervisor);
-    whereAdded = true;
-  }
-
-  if (topic) {
-    query += whereAdded ? ` AND topic = ?` : ` WHERE topic = ?`;
-    queryParams.push(topic);
-    whereAdded = true;
-  }
-
-  if (keyword) {
-    query += whereAdded ? ` AND (title LIKE ? OR description LIKE ?)` : ` WHERE (title LIKE ? OR description LIKE ?)`;
-    queryParams.push(`%${keyword}%`, `%${keyword}%`);
-  }
 
   try {
-    const [rows] = await db.execute(query, queryParams);
-
-    if (rows.length === 0) {
+    const [rows] = await db.execute(sql, params);
+    if (!rows.length) {
       return res.status(404).json({ message: 'No projects found with the selected filters.' });
     }
-
     res.status(200).json({ projects: rows });
   } catch (error) {
     console.error('Error with multi-filtered project search:', error);
@@ -128,83 +134,63 @@ exports.multiFilteredProjects = async (req, res) => {
   }
 };
 
-// 6. Smart search with suggestions
+// 6) Smart search with suggestions (non-archived)
 exports.searchProjects = async (req, res) => {
-  const { query = "" } = req.query;
+  const { query = '' } = req.query;
+  if (!query) return res.status(400).json({ error: 'Search query is required' });
 
-  if (!query) {
-    return res.status(400).json({ error: "Search query is required" });
-  }
-
-  const searchWord = `%${query}%`;
-
+  const like = `%${query}%`;
   try {
     const [results] = await db.execute(`
       SELECT project_id, title, supervisor_name, topic, description,
              quota, spots_filled, (quota - spots_filled) AS quota_remaining
       FROM projects
-      WHERE title LIKE ? OR supervisor_name LIKE ? OR description LIKE ?
-    `, [searchWord, searchWord, searchWord]);
+      WHERE (title LIKE ? OR supervisor_name LIKE ? OR description LIKE ?)
+        AND is_archived = 0
+      ORDER BY created_at DESC, project_id DESC
+    `, [like, like, like]);
 
-    if (results.length > 0) {
-      const formattedResults = results.map(project => ({
-        ...project,
-        quota_status: formatQuota(project.quota_remaining)
-      }));
-
-      return res.status(200).json({ projects: formattedResults });
-    } else {
-      const [allProjects] = await db.execute(`
-        SELECT title FROM projects
-      `);
-
-      if (Array.isArray(allProjects)) {
-        const projectTitles = allProjects.map(p => p.title);
-        const matches = stringSimilarity.findBestMatch(query, projectTitles);
-        const suggestions = matches.ratings
-          .filter(match => match.rating > 0.4)
-          .sort((a, b) => b.rating - a.rating)
-          .slice(0, 3);
-
-        if (suggestions.length > 0) {
-          return res.status(200).json({
-            message: `No exact matches found for "${query}". Did you mean one of these?`,
-            suggestions: suggestions.map(s => s.target)
-          });
-        } else {
-          return res.status(200).json({
-            message: `No projects found for "${query}". Please try a different keyword.`
-          });
-        }
-      } else {
-        console.error("Error: allProjects is not an array");
-        return res.status(500).json({ error: "Failed to fetch projects for suggestions" });
-      }
+    if (results.length) {
+      return res.status(200).json({
+        projects: results.map(p => ({ ...p, quota_status: formatQuota(p.quota_remaining) }))
+      });
     }
+
+    const [allTitles] = await db.execute(`SELECT title FROM projects WHERE is_archived = 0`);
+    const titles = Array.isArray(allTitles) ? allTitles.map(t => t.title) : [];
+    const ratings = stringSimilarity.findBestMatch(query, titles).ratings
+      .filter(r => r.rating > 0.4)
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, 3);
+
+    if (ratings.length) {
+      return res.status(200).json({
+        message: `No exact matches for "${query}". Did you mean:`,
+        suggestions: ratings.map(r => r.target),
+      });
+    }
+    return res.status(200).json({ message: `No projects found for "${query}". Try another keyword.` });
   } catch (err) {
-    console.error("Error searching projects:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error('Error searching projects:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Get full project details by ID (with long description and prerequisites)
+// 7) Full project details by ID (LEFT JOIN so it works even if details not created yet)
 exports.getProjectDetails = async (req, res) => {
   const { projectId } = req.params;
-
   try {
     const [rows] = await db.execute(`
       SELECT 
-        p.project_id, p.title, p.supervisor_name, p.topic, p.quota, p.spots_filled,
+        p.project_id, p.title, p.supervisor_name, p.topic,
+        p.quota, p.spots_filled, (p.quota - p.spots_filled) AS quota_remaining,
         d.full_description, d.prerequisites
       FROM projects p
-      JOIN project_details d ON p.project_id = d.project_id
+      LEFT JOIN project_details d ON p.project_id = d.project_id
       WHERE p.project_id = ?
     `, [projectId]);
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
+    if (!rows.length) return res.status(404).json({ message: 'Project not found' });
     res.status(200).json(rows[0]);
   } catch (error) {
     console.error('Error fetching project details:', error);
@@ -212,12 +198,50 @@ exports.getProjectDetails = async (req, res) => {
   }
 };
 
+/* ========================================================
+ * SUPERVISOR AREA
+ * ====================================================== */
 
-// POST /projects
-// Body: { title, description, topic?, keywords?, quota, full_description?, prerequisites? }
+// 8) My projects (owned by logged-in supervisor)
+//    Use ?archived=1 to fetch archived; default active only
+exports.getMyProjects = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+
+  const archived = parseBool(req.query.archived, false) ? 1 : 0;
+
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        p.project_id, p.title, p.description, p.topic, p.keywords,
+        p.quota, p.spots_filled, (p.quota - p.spots_filled) AS quota_remaining,
+        p.approval_status, p.is_student_proposal, p.is_archived, p.archived_at,
+        p.created_at, p.updated_at,
+        COALESCE(a.alloc_count, 0) AS allocated_count
+      FROM projects p
+      LEFT JOIN (
+        SELECT project_id, COUNT(*) AS alloc_count
+        FROM allocations
+        GROUP BY project_id
+      ) a ON a.project_id = p.project_id
+      WHERE p.supervisor_id = ? AND p.is_archived = ?
+      ORDER BY p.created_at DESC, p.project_id DESC
+    `, [supervisorId, archived]);
+
+    res.json(rows ?? []);
+  } catch (err) {
+    console.error('getMyProjects error:', err);
+    res.status(500).json({ message: 'Database error' });
+  }
+};
+
+/* ========================================================
+ * CREATE
+ * ====================================================== */
+
+// 9) Create a project (supervisors only)
 exports.createProject = async (req, res) => {
   try {
-    // must be logged in as a supervisor
     if (!req.user || req.user.role !== 'supervisor') {
       return res.status(403).json({ message: 'Only supervisors can create projects.' });
     }
@@ -228,35 +252,32 @@ exports.createProject = async (req, res) => {
       topic = null,
       keywords = null,
       quota,
-      full_description = null, // goes into project_details
-      prerequisites = null     // goes into project_details
+      full_description = null,
+      prerequisites = null,
     } = req.body || {};
 
-    // basic validation
     const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
-
     if (!nonEmpty(title) || !nonEmpty(description)) {
       return res.status(400).json({ message: 'Title and description are required.' });
     }
+
     const q = Number(quota);
     if (!Number.isInteger(q) || q < 1) {
       return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
     }
 
-    const supervisor_id = req.user.user_id;     // from JWT
-    const supervisor_name = req.user.name || ''; // you still store name in projects
+    const supervisor_id = req.user.user_id;
+    const supervisor_name = req.user.name || '';
 
-    // Use a transaction because we touch two tables (projects + project_details)
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
 
-      // insert project
       const insertProjectSql = `
         INSERT INTO projects
           (title, description, supervisor_name, topic, keywords,
-           quota, spots_filled, status, supervisor_id)
-        VALUES (?, ?, ?, ?, ?, ?, 0, 'draft', ?)
+           quota, spots_filled, approval_status, supervisor_id, is_student_proposal, is_archived)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'approved', ?, 0, 0)
       `;
       const [result] = await conn.query(insertProjectSql, [
         title.trim(),
@@ -265,12 +286,11 @@ exports.createProject = async (req, res) => {
         topic ? String(topic).trim() : null,
         keywords ? String(keywords).trim() : null,
         q,
-        supervisor_id
+        supervisor_id,
       ]);
 
       const project_id = result.insertId;
 
-      // insert details (keep it even if nulls, or you can conditionally insert)
       const insertDetailsSql = `
         INSERT INTO project_details (project_id, full_description, prerequisites)
         VALUES (?, ?, ?)
@@ -278,22 +298,21 @@ exports.createProject = async (req, res) => {
       await conn.query(insertDetailsSql, [
         project_id,
         full_description ? String(full_description).trim() : null,
-        prerequisites ? String(prerequisites).trim() : null
+        prerequisites ? String(prerequisites).trim() : null,
       ]);
 
       await conn.commit();
 
-      // return the created project
-      const [rows] = await conn.query(
+      const [[project]] = await conn.query(
         `SELECT p.project_id, p.title, p.description, p.topic, p.keywords,
-                p.quota, p.spots_filled, p.status, p.created_at, p.updated_at,
-                p.supervisor_id, p.supervisor_name
+                p.quota, p.spots_filled, p.approval_status, p.created_at, p.updated_at,
+                p.supervisor_id, p.supervisor_name, p.is_student_proposal, p.is_archived
          FROM projects p
          WHERE p.project_id = ?`,
         [project_id]
       );
 
-      return res.status(201).json({ message: 'Project created.', project: rows[0] });
+      return res.status(201).json({ message: 'Project created.', project });
     } catch (txErr) {
       await conn.rollback();
       throw txErr;
@@ -303,5 +322,68 @@ exports.createProject = async (req, res) => {
   } catch (err) {
     console.error('Create project error:', err);
     return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+/* ========================================================
+ * ARCHIVE / UNARCHIVE
+ * ====================================================== */
+
+// Block archiving if project has allocations (change to allow if you prefer)
+exports.archiveProject = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  const { projectId } = req.params;
+  if (!projectId) return res.status(400).json({ message: 'projectId is required' });
+
+  try {
+    const [[proj]] = await db.query(
+      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [projectId, supervisorId]
+    );
+    if (!proj) return res.status(404).json({ message: 'Project not found or not yours' });
+
+    const [[alloc]] = await db.query(
+      `SELECT COUNT(*) AS c FROM allocations WHERE project_id = ?`,
+      [projectId]
+    );
+    if ((alloc?.c || 0) > 0) {
+      return res.status(409).json({ message: 'Cannot archive: project has allocated students' });
+    }
+
+    const [upd] = await db.query(
+      `UPDATE projects SET is_archived = 1, archived_at = NOW() WHERE project_id = ?`,
+      [projectId]
+    );
+    if (!upd.affectedRows) return res.status(500).json({ message: 'Archive failed' });
+
+    return res.json({ message: 'Project archived' });
+  } catch (err) {
+    console.error('archiveProject error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.unarchiveProject = async (req, res) => {
+  const supervisorId = req.user?.user_id;
+  const { projectId } = req.params;
+  if (!projectId) return res.status(400).json({ message: 'projectId is required' });
+
+  try {
+    const [[proj]] = await db.query(
+      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      [projectId, supervisorId]
+    );
+    if (!proj) return res.status(404).json({ message: 'Project not found or not yours' });
+
+    const [upd] = await db.query(
+      `UPDATE projects SET is_archived = 0, archived_at = NULL WHERE project_id = ?`,
+      [projectId]
+    );
+    if (!upd.affectedRows) return res.status(500).json({ message: 'Unarchive failed' });
+
+    return res.json({ message: 'Project restored' });
+  } catch (err) {
+    console.error('unarchiveProject error:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 };

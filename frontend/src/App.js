@@ -18,15 +18,12 @@ import MyProposalPage from './pages/myProposalPage';
 // Supervisor Pages
 import SupervisorDashboardPage from './pages/supervisorDashboardPage';
 import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
+import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';         
 
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
 
-/** Dynamic root redirect:
- *  - If logged in & supervisor -> /supervisor-dashboard
- *  - If logged in & student    -> /student-dashboard
- *  - Otherwise                  -> /login
- */
+/** Dynamic root redirect */
 function RootRedirect() {
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -60,6 +57,7 @@ function App() {
         {/* Supervisor Routes */}
         <Route path="/supervisor-dashboard" element={<SupervisorDashboardPage />} />
         <Route path="/supervisor/create-project" element={<SupervisorCreateProjectPage />} />
+        <Route path="/my-projects" element={<SuperVisorMyProjectsPage />} />         
 
         {/* Help & Support */}
         <Route path="/help-support" element={<HelpSupportPage />} />

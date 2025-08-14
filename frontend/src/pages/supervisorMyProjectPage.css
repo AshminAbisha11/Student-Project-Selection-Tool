@@ -1,0 +1,189 @@
+/* ===== Page background (full screen) ===== */
+.page-root{
+  min-height:100vh;
+  box-sizing:border-box;
+  background:
+    radial-gradient(1200px 800px at -10% -10%, rgba(123,44,191,.15), transparent 60%),
+    radial-gradient(1000px 700px at 110% 110%, rgba(123,44,191,.12), transparent 55%),
+    #f8f6ff;
+}
+
+/* ===== Full-width sticky header (edge-to-edge) ===== */
+.topbar-wrap{
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding: 0; /* touches edges */
+}
+
+/* header component container */
+.sv-header{
+  width:100%;
+  height:64px;
+  border-radius:0;
+  padding-left:32px;
+  padding-right:32px;
+  box-sizing:border-box;
+}
+
+/* ===== Grid under header: sidebar + main, perfectly aligned ===== */
+.main-grid{
+  display:grid;
+  grid-template-columns: 320px minmax(0, 1fr);   /* wider sidebar */
+  gap:8px;                                       /* smaller gap between columns */
+  padding:8px 12px 16px;                         /* tight gutters so bg is minimal */
+  box-sizing:border-box;
+  align-items:stretch;                            /* both columns share the same row height */
+}
+
+/* ===== Sidebar panel: stretch full height & match panel styling ===== */
+.sv-sidebar{
+  align-self:stretch;                             /* fills the grid row height */
+  background:#fff;
+  border:1px solid #ececf6;
+  border-radius:16px;
+  box-shadow:0 12px 32px rgba(75,35,118,.08);
+  padding:18px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  margin:0;                                       /* sit flush with the grid */
+}
+
+/* If your sidebar already draws its own white card, you can keep that
+   and just ensure the OUTER .sv-sidebar has no margin & stretches. */
+
+/* ===== Main column ===== */
+.content-area{
+  width:100%;
+  margin:0;
+  display:flex;
+  flex-direction:column;
+}
+
+/* ===== White container: align top & bottom with sidebar ===== */
+.myproj-panel{
+  background:#fff;
+  border:1px solid #ececf6;
+  border-radius:16px;
+  box-shadow:0 12px 32px rgba(75,35,118,.08);
+  padding:36px;
+  width:100%;
+  max-width:none;                        /* fill column */
+  margin:0;                              /* align with sidebar */
+  /* Fill viewport height under the header and grid paddings so bottoms line up */
+  min-height: calc(100vh - 64px /*header*/ - 8px /*grid top pad*/ - 16px /*grid bottom pad*/);
+}
+
+/* Panel content fills panel (no extra max-width) */
+.page-inner{
+  max-width:none;
+  margin:0;
+  width:100%;
+  padding:0;
+}
+
+/* ===== Controls row ===== */
+.myproj-controls{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  margin:12px 0 16px;
+}
+.myproj-controls label{ margin-right:4px; color:#2c1f3d; font-weight:700; }
+.myproj-controls .btn{ height:36px; display:inline-flex; align-items:center; }
+
+/* ===== Cards ===== */
+.project-card{
+  border:1px solid #ececf6;
+  box-shadow:0 10px 24px rgba(75,35,118,.08);
+  transition:box-shadow .18s ease, transform .18s ease;
+  border-radius:16px;
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  background:#fff;
+  padding:16px 18px;
+}
+.project-card:hover{
+  box-shadow:0 14px 32px rgba(75,35,118,.12);
+  transform:translateY(-2px);
+}
+
+/* ===== Grid of cards (a touch wider) ===== */
+.projects-grid{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap:24px;
+  align-items:stretch;
+}
+
+/* ===== Text & meta ===== */
+.project-title{ margin:6px 0 6px; font-size:20px; color:#221a2f; }
+.project-desc{ margin:0 0 12px; color:#4d4759; line-height:1.45; }
+.meta-row{ margin-bottom:10px; display:flex; flex-wrap:wrap; gap:6px; }
+.capacity-row{
+  padding-top:12px; border-top:1px dashed #eee;
+  display:flex; justify-content:space-between; align-items:center;
+}
+
+/* ===== Quota badge ===== */
+.quota-badge{
+  background:#e9f7ef; color:#1e4620; border:1px solid #b7e0c7;
+  font-size:11.5px; padding:5px 10px; border-radius:999px; font-weight:700; white-space:nowrap;
+}
+.quota-badge.full{ background:#fdecea; color:#611a15; border:1px solid #f5c6cb; }
+
+/* ===== Numbers ===== */
+.numbers{ display:flex; align-items:center; gap:12px; }
+.numbers span{ font-size:13.5px; color:#333; white-space:nowrap; }
+.numbers span + span{ padding-left:12px; border-left:1px solid #eee; }
+
+/* ===== Footer ===== */
+.footer-row{
+  margin-top:12px; padding-top:12px; border-top:1px solid #f2f2fa;
+  display:flex; justify-content:space-between; align-items:flex-end; gap:10px;
+}
+.dates{ color:#6f6f7b; font-size:12px; line-height:1.35; display:inline-block; max-width:62%; white-space:normal; }
+.card-actions{ margin-left:auto; display:inline-flex; gap:8px; }
+
+/* ===== Buttons ===== */
+.btn{
+  padding:8px 12px; border-radius:999px; font-weight:700; cursor:pointer; line-height:1;
+  box-shadow:0 3px 10px rgba(75,35,118,.10); border:none; display:inline-flex; align-items:center; justify-content:center;
+}
+.btn-primary{ background:#7b2cbf; color:#fff; }
+.btn-primary:hover{ filter:brightness(.98); }
+.btn-outline{ background:#fff; color:#5c2d91; border:2px solid #5c2d91; }
+.btn-outline:hover{ background:#f3ecff; }
+.btn-danger{ background:#e74c3c; color:#fff; box-shadow:0 3px 10px rgba(231,76,60,.15); }
+.btn-danger:hover{ filter:brightness(.95); }
+.btn.btn-archive{ background:#e9e9ee; color:#333; border:1px solid #dedee6; }
+.btn.btn-archive:hover{ background:#e2e2e8; }
+
+/* ===== Chips ===== */
+.project-card__top{ display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+.chip{
+  background:#f6f0ff; color:#5a2f90; border:1px solid #ede4ff;
+  padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; display:inline-flex; align-items:center;
+}
+.project-card__top .chip{ letter-spacing:.2px; }
+.chip--approved{ background:#eaf8f0; border-color:#cfeedd; color:#184d2a; }
+.chip--pending { background:#fff6e9; border-color:#ffe3bd; color:#7a4a00; }
+.chip--rejected{ background:#fdebea; border-color:#f6c9c7; color:#7b2521; }
+.chip--archived{ background:#f5f6f8; border-color:#e7e9ee; color:#666; }
+
+/* ===== Responsive ===== */
+@media (max-width:1100px){
+  .main-grid{ padding:8px 12px 12px; gap:12px; }
+  .myproj-panel{ min-height:auto; padding:24px; }
+}
+@media (max-width:900px){
+  .main-grid{ grid-template-columns: 1fr; } /* stack sidebar above content */
+}
+@media (max-width:560px){
+  .footer-row{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .card-actions{ margin-left:0; }
+  .dates{ max-width:100%; }
+}
