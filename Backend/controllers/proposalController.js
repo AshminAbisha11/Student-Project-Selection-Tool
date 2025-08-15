@@ -91,36 +91,27 @@ exports.submitProposal = async (req, res) => {
  *    is not an admin), 403 is returned.
  */
 exports.getProposalsByStudent = async (req, res) => {
-  const requesterId = req.user?.user_id;
-  const requesterRole = String(req.user?.role || '').toLowerCase();
-
-  if (!requesterId) return res.status(401).json({ message: 'Unauthorized' });
-
-  let studentId = req.params?.studentId ? Number(req.params.studentId) : requesterId;
-  if (!Number.isInteger(studentId)) {
-    studentId = requesterId;
-  }
-
-  // Only allow different studentId if you have admins; otherwise lock to self
-  if (studentId !== requesterId && requesterRole !== 'admin') {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
+  const studentId = req.user?.user_id; // from auth middleware
+  if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
     const [rows] = await db.query(
-      `SELECT
-          p.id            AS proposal_id,
-          p.title,
-          p.description,
-          p.submitted_at,
-          p.file_path,
-          p.supervisor_id,
-          u.name          AS supervisor_name,
-          u.email         AS supervisor_email
-        FROM proposals p
-        LEFT JOIN users u ON u.user_id = p.supervisor_id
-       WHERE p.student_id = ?
-       ORDER BY p.submitted_at DESC, p.id DESC`,
+      `
+      SELECT
+        p.proposal_id   AS proposal_id,
+        p.title,
+        p.description,
+        p.submitted_at,
+        p.file_path,
+        p.supervisor_id,
+        u.name          AS supervisor_name,
+        u.email         AS supervisor_email,
+        p.status        AS status
+      FROM proposals p
+      LEFT JOIN users u ON u.user_id = p.supervisor_id
+      WHERE p.student_id = ?
+      ORDER BY p.submitted_at DESC, p.proposal_id DESC
+      `,
       [studentId]
     );
 

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './myProposalPage.css';
 
@@ -19,6 +20,12 @@ export default function SubmitProposalPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [fileKey, setFileKey] = useState(0); // reset file input
+
+  // Success modal
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [submittedTo, setSubmittedTo] = useState(null); // { name, email }
+  const modalRef = useRef(null);
+  const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
   const authHeaders = useMemo(
@@ -48,7 +55,20 @@ export default function SubmitProposalPage() {
       }
     })();
     return () => { mounted = false; };
-  }, [API, authHeaders]);
+  }, [authHeaders]);
+
+  // Modal: close on ESC
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && setSuccessOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  const onBackdropClick = (e) => {
+    if (modalRef.current && !modalRef.current.contains(e.target)) {
+      setSuccessOpen(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -67,7 +87,14 @@ export default function SubmitProposalPage() {
     try {
       setSubmitting(true);
       await axios.post(`${API}/proposals`, fd, { headers: authHeaders });
-      alert('Proposal submitted successfully!');
+
+      // find supervisor for display
+      const sup = supervisors.find(
+        (s) => String(s.supervisor_id) === String(supervisorId)
+      );
+      setSubmittedTo(sup || null);
+      setSuccessOpen(true);
+
       // reset form
       setTitle('');
       setDescription('');
@@ -89,7 +116,6 @@ export default function SubmitProposalPage() {
         <Sidebar />
 
         <div className="content-area">
-          {/* Global header, visually attached to the sidebar */}
           <HeaderBar />
 
           <div className="page-inner">
@@ -130,7 +156,9 @@ export default function SubmitProposalPage() {
                 ))}
               </select>
               {loadingSup && <small>Loading supervisors…</small>}
-              {!loadingSup && supError && <small style={{ color: '#b00' }}>{supError}</small>}
+              {!loadingSup && supError && (
+                <small style={{ color: '#b00' }}>{supError}</small>
+              )}
               {!loadingSup && !supError && supervisors.length === 0 && (
                 <small style={{ color: '#b00' }}>No supervisors available.</small>
               )}
@@ -151,6 +179,46 @@ export default function SubmitProposalPage() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {successOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={onBackdropClick}
+          aria-modal="true"
+          role="dialog"
+        >
+          <div className="modal" ref={modalRef}>
+            <div className="modal-icon">✅</div>
+            <h3 className="modal-title">Proposal submitted</h3>
+            <p className="modal-text">
+              Your proposal has been submitted to{' '}
+              <strong>{submittedTo?.name || 'the selected supervisor'}</strong>.
+              Please wait for their status/response.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setSuccessOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setSuccessOpen(false);
+                  navigate('/my-proposals');
+                }}
+              >
+                View My Proposals
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,22 +6,27 @@ const VALID_CONTACT = ['Yes', 'No'];
 /* -------------------------------------------------------
  * Helpers
  * ----------------------------------------------------- */
-async function repackOrders(studentId) {
+async function repackOrders(studentId, cycleId) {
   const [rows] = await db.query(
-    `SELECT preference_id FROM preferences
-     WHERE student_id = ?
-     ORDER BY preference_order ASC`,
-    [studentId]
+    `SELECT preference_id
+       FROM preferences
+      WHERE student_id = ? AND cycle_id = ?
+      ORDER BY preference_order ASC`,
+    [studentId, cycleId]
   );
   for (let i = 0; i < rows.length; i++) {
     const id = rows[i].preference_id;
-    await db.query(`UPDATE preferences SET preference_order = ? WHERE preference_id = ?`, [i + 1, id]);
+    // pack to 1..N
+    await db.query(
+      `UPDATE preferences SET preference_order = ? WHERE preference_id = ?`,
+      [i + 1, id]
+    );
   }
 }
 
 /* =======================================================
  * GET /preferences
- * Return the student's preferences (with project_id)
+ * Return the student's preferences (include is_locked!)
  * ===================================================== */
 exports.getPreferencesByStudent = async (req, res) => {
   const studentId = req.user?.user_id;
@@ -34,6 +39,7 @@ exports.getPreferencesByStudent = async (req, res) => {
       p.project_id,
       p.contacted_supervisor,      -- 'Yes' | 'No'
       p.cycle_id,
+      p.is_locked,                 -- << IMPORTANT for FE
       pr.title,
       pr.description,
       pr.supervisor_name
@@ -53,6 +59,31 @@ exports.getPreferencesByStudent = async (req, res) => {
 };
 
 /* =======================================================
+ * GET /preferences/submission  (or /preferences/submitted)
+ * Read-only status so FE can show Submitted / Resubmit text
+ * ===================================================== */
+exports.getSubmissionStatus = async (req, res) => {
+  try {
+    const studentId = req.user?.user_id;
+    if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // latest submission across cycles (or add WHERE cycle_id = ? if you pass one)
+    const [rows] = await db.query(
+      `SELECT MAX(submitted_at) AS submitted_at
+         FROM preference_submissions
+        WHERE student_id = ?`,
+      [studentId]
+    );
+
+    const submitted_at = rows?.[0]?.submitted_at || null;
+    res.json({ submitted: Boolean(submitted_at), submitted_at });
+  } catch (e) {
+    console.error('getSubmissionStatus error:', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/* =======================================================
  * POST /preferences
  * Body: { project_id }
  * Adds a preference (max 5). Defaults contacted_supervisor = 'No'.
@@ -68,10 +99,13 @@ exports.addPreference = async (req, res) => {
   if (!project_id) return res.status(400).json({ message: 'project_id is required' });
 
   try {
-    // existing preferences (limit 5)
+    // Only check within this cycle
     const [existing] = await db.query(
-      `SELECT project_id FROM preferences WHERE student_id = ? ORDER BY preference_order ASC`,
-      [student_id]
+      `SELECT project_id
+         FROM preferences
+        WHERE student_id = ? AND cycle_id = ?
+        ORDER BY preference_order ASC`,
+      [student_id, cycleId]
     );
 
     if (existing.length >= 5) {
@@ -82,12 +116,12 @@ exports.addPreference = async (req, res) => {
     }
 
     const preference_order = existing.length + 1;
-    const contacted_supervisor = 'No'; // <— default on add from Browse
+    const contacted_supervisor = 'No';
 
     const [result] = await db.query(
       `INSERT INTO preferences
-         (student_id, project_id, preference_order, contacted_supervisor, cycle_id)
-       VALUES (?, ?, ?, ?, ?)`,
+         (student_id, project_id, preference_order, contacted_supervisor, cycle_id, is_locked)
+       VALUES (?, ?, ?, ?, ?, 0)`,
       [student_id, project_id, preference_order, contacted_supervisor, cycleId]
     );
 
@@ -98,6 +132,7 @@ exports.addPreference = async (req, res) => {
       preference_order,
       contacted_supervisor,
       cycle_id: cycleId,
+      is_locked: 0,
     });
   } catch (err) {
     console.error('Error adding preference:', err);
@@ -122,14 +157,14 @@ exports.updatePreferenceOrder = async (req, res) => {
     return res.status(400).json({ message: 'preference_id and preference_order are required' });
   }
 
-  const sql = `
-    UPDATE preferences
-    SET preference_order = ?
-    WHERE preference_id = ? AND student_id = ?
-  `;
-
   try {
-    const [r] = await db.query(sql, [preference_order, preference_id, studentId]);
+    const [r] = await db.query(
+      `UPDATE preferences
+          SET preference_order = ?
+        WHERE preference_id = ? AND student_id = ?`,
+      [preference_order, preference_id, studentId]
+    );
+
     if (r.affectedRows === 0) {
       return res.status(404).json({ message: 'Preference not found' });
     }
@@ -164,8 +199,8 @@ exports.updateContactedSupervisor = async (req, res) => {
   try {
     const [result] = await db.query(
       `UPDATE preferences
-         SET contacted_supervisor = ?
-       WHERE preference_id = ? AND student_id = ?`,
+          SET contacted_supervisor = ?
+        WHERE preference_id = ? AND student_id = ?`,
       [contacted_supervisor, preference_id, studentId]
     );
 
@@ -182,7 +217,7 @@ exports.updateContactedSupervisor = async (req, res) => {
 
 /* =======================================================
  * DELETE /preferences/:preferenceId
- * Deletes a preference and compacts the remaining order.
+ * Deletes a preference and compacts the remaining order (cycle-scoped).
  * ===================================================== */
 exports.deletePreference = async (req, res) => {
   const preferenceId = req.params.preferenceId;
@@ -192,6 +227,16 @@ exports.deletePreference = async (req, res) => {
   if (!preferenceId) return res.status(400).json({ message: 'preferenceId is required' });
 
   try {
+    // find its cycle first
+    const [[row]] = await db.query(
+      `SELECT cycle_id FROM preferences WHERE preference_id = ? AND student_id = ?`,
+      [preferenceId, studentId]
+    );
+    if (!row) {
+      return res.status(404).json({ message: 'Preference not found' });
+    }
+    const cycleId = row.cycle_id;
+
     const [del] = await db.query(
       `DELETE FROM preferences WHERE preference_id = ? AND student_id = ?`,
       [preferenceId, studentId]
@@ -201,7 +246,7 @@ exports.deletePreference = async (req, res) => {
       return res.status(404).json({ message: 'Preference not found' });
     }
 
-    await repackOrders(studentId);
+    await repackOrders(studentId, cycleId);
     return res.status(200).json({ message: 'Preference deleted and reordered successfully' });
   } catch (err) {
     console.error('Error deleting/reordering preference:', err);
@@ -227,7 +272,7 @@ exports.submitPreferences = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // 1) Read current (unlocked OR locked — we snapshot what's there) preferences for this cycle
+    // 1) Read current preferences for this cycle
     const [prefs] = await conn.query(
       `SELECT preference_id, project_id, preference_order, contacted_supervisor, is_locked
          FROM preferences
@@ -241,8 +286,8 @@ exports.submitPreferences = async (req, res) => {
       return res.status(400).json({ message: 'Add at least one preference before submitting.' });
     }
 
-    // If already locked, treat as already submitted (idempotent UX)
-    const alreadyLocked = prefs.every(p => p.is_locked === 1);
+    // Already locked => idempotent success
+    const alreadyLocked = prefs.every(p => Number(p.is_locked) === 1);
     if (alreadyLocked) {
       await conn.rollback();
       return res.status(200).json({ message: 'Preferences already submitted.' });
@@ -274,7 +319,7 @@ exports.submitPreferences = async (req, res) => {
     );
     const submissionId = sub.submission_id;
 
-    // 5) Rewrite snapshot items to match current prefs
+    // 5) Rewrite snapshot items
     await conn.query(
       `DELETE FROM preference_submission_items WHERE submission_id = ?`,
       [submissionId]
@@ -286,6 +331,8 @@ exports.submitPreferences = async (req, res) => {
       p.preference_order,
       p.contacted_supervisor
     ]);
+
+    // bulk insert (mysql2 format)
     await conn.query(
       `INSERT INTO preference_submission_items
          (submission_id, project_id, pref_order, contacted_supervisor)

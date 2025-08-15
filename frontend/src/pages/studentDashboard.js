@@ -1,34 +1,43 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import './studentDashboard.css';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/sideBar';
 import ProfileDropdown from '../components/profileDropdown';
 
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
 
+  // Stats + identity
   const [dashboardData, setDashboardData] = useState({
-    stats: {
-      preferencesSubmitted: 0,
-      proposalsSent: 0,
-      applicationStatus: 'Pending',
-    },
+    stats: { preferencesSubmitted: 0, proposalsSent: 0, applicationStatus: 'Pending' },
   });
-  const [showPrefModal, setShowPrefModal] = useState(false);
-  const [showProposalModal, setShowProposalModal] = useState(false);
-  const [preferences, setPreferences] = useState([]);
-  const [proposals, setProposals] = useState([]);
 
-  // 🔑 read the unified auth keys
   const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const user = (() => {
+    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
+    catch { return null; }
+  })();
   const userId = user?.user_id;
   const studentName = user?.name || 'Student';
 
-  // ✅ gate: must be logged in *and* a student
+  // Modals
+  const [showPrefModal, setShowPrefModal] = useState(false);
+  const [showProposalModal, setShowProposalModal] = useState(false);
+
+  // Data for modals
+  const [preferences, setPreferences] = useState([]);
+  const [proposals, setProposals] = useState([]);
+
+  // Loading/error states
+  const [prefLoading, setPrefLoading] = useState(false);
+  const [propLoading, setPropLoading] = useState(false);
+  const [prefErr, setPrefErr] = useState('');
+  const [propErr, setPropErr] = useState('');
+
+  /* ----------------------- Auth gate ----------------------- */
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -39,16 +48,17 @@ export default function StudentDashboard() {
     }
   }, [navigate, token, user]);
 
-  // fetch dashboard stats
+  /* -------------------- Fetch dashboard -------------------- */
   useEffect(() => {
-    const fetchDashboard = async () => {
-      if (!userId || !token) return;
+    if (!userId || !token) return;
 
+    let cancelled = false;
+    (async () => {
       try {
         const res = await axios.get(`${API}/dashboard/${userId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setDashboardData(res.data);
+        if (!cancelled) setDashboardData(res.data);
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
         if (err.response?.status === 401 || err.response?.status === 403) {
@@ -57,12 +67,29 @@ export default function StudentDashboard() {
           navigate('/login', { replace: true });
         }
       }
-    };
+    })();
 
-    fetchDashboard();
+    return () => { cancelled = true; };
   }, [userId, token, navigate]);
 
+  /* ----------------- ESC key closes modals ----------------- */
+  const onEscToClose = useCallback((e) => {
+    if (e.key === 'Escape') {
+      setShowPrefModal(false);
+      setShowProposalModal(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (showPrefModal || showProposalModal) {
+      document.addEventListener('keydown', onEscToClose);
+      return () => document.removeEventListener('keydown', onEscToClose);
+    }
+  }, [showPrefModal, showProposalModal, onEscToClose]);
+
+  /* --------------- Open modals (load content) -------------- */
   const handleShowPreferences = async () => {
+    setPrefErr('');
+    setPrefLoading(true);
     try {
       const res = await axios.get(`${API}/preferences`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -71,11 +98,15 @@ export default function StudentDashboard() {
       setShowPrefModal(true);
     } catch (err) {
       console.error('Error fetching preferences:', err);
-      alert('Failed to load preferences.');
+      setPrefErr('Failed to load preferences.');
+    } finally {
+      setPrefLoading(false);
     }
   };
 
   const handleShowProposals = async () => {
+    setPropErr('');
+    setPropLoading(true);
     try {
       const res = await axios.get(`${API}/proposals/${userId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -84,10 +115,13 @@ export default function StudentDashboard() {
       setShowProposalModal(true);
     } catch (err) {
       console.error('Error fetching proposals:', err);
-      alert('Failed to load proposals.');
+      setPropErr('Failed to load proposals.');
+    } finally {
+      setPropLoading(false);
     }
   };
 
+  /* -------------------------- UI --------------------------- */
   return (
     <div className="dashboard-container" style={{ backgroundImage: "url('/assets/login_background.png')" }}>
       <Sidebar />
@@ -104,14 +138,30 @@ export default function StudentDashboard() {
         </div>
 
         <div className="dashboard-cards">
-          <div className="dashboard-card" onClick={handleShowPreferences} style={{ cursor: 'pointer' }}>
+          <div
+            className="dashboard-card"
+            onClick={handleShowPreferences}
+            style={{ cursor: 'pointer' }}
+            role="button"
+            aria-haspopup="dialog"
+            aria-label="View Preferred Projects"
+          >
             <h4>{dashboardData.stats.preferencesSubmitted}</h4>
             <p>Preferred Projects</p>
           </div>
-          <div className="dashboard-card" onClick={handleShowProposals} style={{ cursor: 'pointer' }}>
+
+          <div
+            className="dashboard-card"
+            onClick={handleShowProposals}
+            style={{ cursor: 'pointer' }}
+            role="button"
+            aria-haspopup="dialog"
+            aria-label="View Proposals Sent"
+          >
             <h4>{dashboardData.stats.proposalsSent}</h4>
             <p>Proposals Sent</p>
           </div>
+
           <div className="dashboard-card">
             <h4>{dashboardData.stats.applicationStatus}</h4>
             <p>Application Status</p>
@@ -127,50 +177,103 @@ export default function StudentDashboard() {
         </div>
       </div>
 
-      {/* Preferences Modal */}
+      {/* ---------------- Preferences Modal ---------------- */}
       {showPrefModal && (
-        <div className="modal-overlay">
-          <div className="modal-content styled-card-modal">
-            <button className="modal-close" onClick={() => setShowPrefModal(false)}>✕</button>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPrefModal(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="modal-content styled-card-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="modal-close" onClick={() => setShowPrefModal(false)} aria-label="Close">✕</button>
             <h3 className="modal-title">Preferred Projects</h3>
-            <div className="project-card-container">
-              {preferences.map((pref, index) => (
-                <div className="project-card" key={pref.preference_id || index}>
-                  <h4>{index + 1}. {pref.title}</h4>
-                  <p className="project-description">{pref.description}</p>
-                  <p className="supervisor-name">Supervisor: {pref.supervisor_name}</p>
-                </div>
-              ))}
-            </div>
+
+            {prefLoading ? (
+              <p>Loading…</p>
+            ) : prefErr ? (
+              <p style={{ color: '#b00' }}>{prefErr}</p>
+            ) : preferences.length === 0 ? (
+              <p>You haven’t added any preferences yet.</p>
+            ) : (
+              <div className="project-card-container">
+                {preferences.map((pref, index) => (
+                  <div className="project-card" key={pref.preference_id ?? `${pref.project_id}-${index}`}>
+                    <h4>{index + 1}. {pref.title}</h4>
+                    {pref.description && <p className="project-description">{pref.description}</p>}
+                    {pref.supervisor_name && (
+                      <p className="supervisor-name">Supervisor: {pref.supervisor_name}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Proposals Modal */}
+      {/* ----------------- Proposals Modal ----------------- */}
       {showProposalModal && (
-        <div className="modal-overlay">
-          <div className="modal-content styled-card-modal">
-            <button className="modal-close" onClick={() => setShowProposalModal(false)}>✕</button>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowProposalModal(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="modal-content styled-card-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="modal-close" onClick={() => setShowProposalModal(false)} aria-label="Close">✕</button>
             <h3 className="modal-title">Proposals Sent</h3>
-            <div className="project-card-container">
-              {proposals.map((proposal, index) => (
-                <div className="project-card" key={proposal.proposal_id || index}>
-                  <h4>{index + 1}. {proposal.title}</h4>
-                  <p className="project-description">{proposal.description}</p>
-                  {proposal.status && <p className="supervisor-name">Status: {proposal.status}</p>}
-                  {proposal.file_path && (
-                    <a
-                      className="download-link"
-                      href={`${API}/uploads/${proposal.file_path}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      📎 View Attachment
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
+
+            {propLoading ? (
+              <p>Loading…</p>
+            ) : propErr ? (
+              <p style={{ color: '#b00' }}>{propErr}</p>
+            ) : proposals.length === 0 ? (
+              <p>You haven’t submitted any proposals yet.</p>
+            ) : (
+              <div className="project-card-container">
+                {proposals.map((proposal, index) => (
+                  <div className="project-card" key={proposal.proposal_id ?? `p-${index}`}>
+                    <h4>{index + 1}. {proposal.title}</h4>
+
+                    {proposal.description && (
+                      <p className="project-description">{proposal.description}</p>
+                    )}
+
+                    <p className="supervisor-name">
+                      {proposal.supervisor_name ? (
+                        <>Supervisor: {proposal.supervisor_name}</>
+                      ) : (
+                        <>Supervisor: —</>
+                      )}
+                      {proposal.submitted_at && (
+                        <> • Submitted: {new Date(proposal.submitted_at).toLocaleString()}</>
+                      )}
+                      {proposal.status && (
+                        <> • Status: <strong>{proposal.status}</strong></>
+                      )}
+                    </p>
+
+                    {proposal.file_path && (
+                      <a
+                        className="download-link"
+                        href={`${API}/uploads/${encodeURIComponent(proposal.file_path)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        📎 View Attachment
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

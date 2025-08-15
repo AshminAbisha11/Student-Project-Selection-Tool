@@ -9,6 +9,9 @@ router.use(verifyToken);
 // ===== Read (always allowed) =====
 router.get('/', preferenceController.getPreferencesByStudent);
 
+// NEW: tell the client if the student already submitted (and when)
+router.get(['/submission', '/submitted'], preferenceController.getSubmissionStatus);
+
 // ===== Writes (blocked after deadline) =====
 router.post('/', submissionWindow, preferenceController.addPreference);
 router.put('/', submissionWindow, preferenceController.updatePreferenceOrder);
@@ -16,7 +19,6 @@ router.patch('/contacted', submissionWindow, preferenceController.updateContacte
 router.delete('/:preferenceId', submissionWindow, preferenceController.deletePreference);
 
 // ===== Final submission =====
-// This should still be allowed until deadline, then locked by submissionWindow
 router.post('/submit', submissionWindow, preferenceController.submitPreferences);
 
 module.exports = router;
