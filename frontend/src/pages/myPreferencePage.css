@@ -1,201 +1,211 @@
+/* ============================
+   Preferences Page (scoped)
+   ============================ */
+.preferences-page {
+  --purple: #5c2d91;
+  --purple-700: #45217e;
+  --purple-600: #4a2083;
+  --purple-100: #f3ecff;
+  --bg: #f7f5fc;
+  --white: #fff;
+  --ink-900: #2c2c2c;
+  --ink-700: #444;
+  --ink-600: #666;
+  --border: #ece7ff;
+  --dash: #d9ccff;
+  --badge-bg: #f1eafd;
+  --shadow: 0 10px 24px rgba(75,35,118,.08);
+  --shadow-strong: 0 8px 24px rgba(92,45,145,.25);
+}
+
 /* ===== Layout ===== */
-.page-container{
+.preferences-page .page-container{
   display:flex;
   min-height:100vh;
-  background:#f7f5fc;
+  background:var(--bg);
   font-family:"Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
-.sidebar{
+.preferences-page .sidebar{
   width:220px;
-  background:#fff;
-  border-right:1px solid #ece7ff;
+  background:var(--white);
+  border-right:1px solid var(--border);
   padding:20px 10px;
-  position:fixed; inset:0 auto 0 0;
+  position:fixed;
+  inset:0 auto 0 0;
 }
 
-.content-area{
+.preferences-page .content-area{
   margin-left:220px;
   width:calc(100% - 220px);
   padding:24px 24px 48px;
 }
 
-/* keep content nicely centered like the dashboard */
-.page-inner{
+.preferences-page .page-inner{
   max-width:1280px;
   margin:0 auto;
 }
 
 /* ===== Header row (title + actions) ===== */
-.preferences-wrapper{ display:flex; flex-direction:column; gap:18px; }
+.preferences-page .preferences-wrapper{ display:flex; flex-direction:column; gap:18px; }
 
-.prefs-header{
+.preferences-page .prefs-header{
   display:flex; justify-content:space-between; align-items:center; gap:12px;
   margin:6px 0 4px;
 }
 
-.pref-actions{ display:inline-flex; align-items:center; gap:10px; }
+.preferences-page .pref-actions{ display:inline-flex; align-items:center; gap:10px; }
 
 /* count pill and primary button (match dashboard look) */
-.pref-count{
-  background:#5c2d91; color:#fff; border-radius:999px;
+.preferences-page .pref-count{
+  background:var(--purple); color:var(--white); border-radius:999px;
   padding:8px 14px; font-weight:700; font-size:14px; line-height:1;
   box-shadow:0 3px 6px rgba(0,0,0,.12);
 }
 
-.btn{
+/* ===== Buttons (scoped) ===== */
+.preferences-page .btn{
   padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer;
   border:none; line-height:1; box-shadow:0 4px 12px rgba(75,35,118,.12);
   transition:filter .12s ease, transform .08s ease, background .12s ease, opacity .12s ease;
 }
-.btn:active{ transform:translateY(1px); }
+.preferences-page .btn:active{ transform:translateY(1px); }
 
-.btn-primary{ background:#5c2d91; color:#fff; }
-.btn-primary:hover{ background:#45217e; }
+.preferences-page .btn-primary{ background:var(--purple); color:var(--white); }
+.preferences-page .btn-primary:hover{ background:var(--purple-700); }
 
-.btn-outline{
-  background:#fff; color:#5c2d91; border:2px solid #5c2d91;
+.preferences-page .btn-outline{
+  background:var(--white); color:var(--purple); border:2px solid var(--purple);
 }
-.btn-outline:hover{ background:#f3ecff; }
+.preferences-page .btn-outline:hover{ background:var(--purple-100); }
 
-.btn-danger{
-  background:#e74c3c; color:#fff;
-}
-.btn-danger:hover{ filter:brightness(.95); }
+.preferences-page .btn-danger{ background:#e74c3c; color:var(--white); }
+.preferences-page .btn-danger:hover{ filter:brightness(.95); }
 
-/* Disabled state for all buttons */
-.btn:disabled,
-.btn[disabled]{
-  opacity:.55;
-  cursor:not-allowed;
-  box-shadow:none;
-  filter:none;
+.preferences-page .btn:disabled,
+.preferences-page .btn[disabled]{
+  opacity:.55; cursor:not-allowed; box-shadow:none; filter:none;
 }
 
 /* ===== Grid ===== */
-.preferences-grid{
+.preferences-page .preferences-grid{
   display:grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap:22px;
-  align-items:stretch;          /* ensures equal height */
+  align-items:stretch;
 }
 
 /* ===== Card ===== */
-.pref-card{
-  background:#fff;
+.preferences-page .pref-card{
+  background:var(--white);
   border-radius:16px;
-  box-shadow:0 10px 24px rgba(75,35,118,.08);
+  box-shadow:var(--shadow);
   padding:18px 18px 14px;
   display:flex; flex-direction:column;
-  min-height:260px;             /* consistent height */
-  position:relative;            /* <-- lets us place the badge without affecting layout */
+  min-height:260px;
+  position:relative; /* for badge */
 }
 
-/* top left badge */
-.pref-card .badge{
+.preferences-page .pref-card .badge{
   display:inline-block;
-  background:#f1eafd; color:#5c2d91; font-weight:700; font-size:12px;
+  background:var(--badge-bg); color:var(--purple); font-weight:700; font-size:12px;
   padding:6px 10px; border-radius:999px; margin-bottom:10px;
 }
 
-.pref-card__content{
-  display:flex; flex-direction:column; gap:8px; flex:1; /* pushes footer down */
+.preferences-page .pref-card__content{
+  display:flex; flex-direction:column; gap:8px; flex:1;
 }
 
-.pref-title{
-  margin:2px 0 0; font-size:16px; font-weight:800; color:#2c2c2c;
+.preferences-page .pref-title{
+  margin:2px 0 0; font-size:16px; font-weight:800; color:var(--ink-900);
 }
 
-.pref-card p{ margin:0; color:#444; }
-.pref-card .description{ color:#666; line-height:1.55; }
+.preferences-page .pref-card p{ margin:0; color:var(--ink-700); }
+.preferences-page .pref-card .description{ color:var(--ink-600); line-height:1.55; }
 
-/* footer buttons aligned across all cards */
-.actions{
+.preferences-page .actions{
   display:flex; gap:10px; margin-top:12px;
 }
 
-/* ===== "Have you contacted the supervisor?" field ===== */
-.contacted-field{
+/* ===== "Have you contacted the supervisor?" ===== */
+.preferences-page .contacted-field{
   margin-top:8px;
   display:flex;
   flex-direction:column;
   gap:6px;
 }
 
-.contacted-field label{
+.preferences-page .contacted-field label{
   font-size:13px;
   font-weight:700;
-  color:#5c2d91;
+  color:var(--purple);
 }
 
-.contacted-field select{
+.preferences-page .contacted-field select{
   width:100%;
   padding:10px 12px;
   border-radius:10px;
   border:2px solid #e8ddff;
   background:#faf8ff;
-  color:#2c2c2c;
+  color:var(--ink-900);
   font-weight:600;
   outline:none;
   transition:border-color .12s ease, box-shadow .12s ease, background .12s ease;
-  appearance:none;             /* cleaner look */
+  appearance:none;
 }
-
-.contacted-field select:focus{
-  border-color:#5c2d91;
+.preferences-page .contacted-field select:focus{
+  border-color:var(--purple);
   box-shadow:0 0 0 4px rgba(92,45,145,.12);
-  background:#fff;
+  background:var(--white);
 }
 
 /* ===== Empty slot ===== */
-.pref-card.empty{
+.preferences-page .pref-card.empty{
   background:#fbf9ff;
-  border:2px dashed #d9ccff;
+  border:2px dashed var(--dash);
   box-shadow:none;
 }
 
-/* keep the badge visible but don't let it push the content down */
-.pref-card.empty .badge{
+.preferences-page .pref-card.empty .badge{
   position:absolute;
   top:12px;
   left:12px;
   margin-bottom:0;
 }
 
-/* center the + and the label */
-.pref-card.empty .empty-content{
+.preferences-page .pref-card.empty .empty-content{
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
   gap:10px;
   flex:1;
-  min-height:220px;   /* enough space to visually center */
+  min-height:220px;
   text-align:center;
 }
 
-.pref-card.empty .placeholder{
+.preferences-page .pref-card.empty .placeholder{
   color:#6b4caf;
 }
 
 /* big circular + button */
-.add-project-btn{
+.preferences-page .add-project-btn{
   width:56px; height:56px; border-radius:50%;
   border:none;
-  background:#5c2d91; color:#fff;
+  background:var(--purple); color:var(--white);
   font-size:28px; font-weight:800; line-height:1;
   display:inline-flex; align-items:center; justify-content:center;
   cursor:pointer;
-  box-shadow:0 8px 24px rgba(92,45,145,.25);
+  box-shadow:var(--shadow-strong);
   transition:transform .08s ease, box-shadow .15s ease, background .15s ease;
 }
-.add-project-btn:hover{ background:#4a2083; box-shadow:0 10px 28px rgba(92,45,145,.30); }
-.add-project-btn:active{ transform:translateY(1px); }
-.add-project-btn:focus-visible{ outline:3px solid rgba(92,45,145,.35); outline-offset:2px; }
+.preferences-page .add-project-btn:hover{ background:var(--purple-600); box-shadow:0 10px 28px rgba(92,45,145,.30); }
+.preferences-page .add-project-btn:active{ transform:translateY(1px); }
+.preferences-page .add-project-btn:focus-visible{ outline:3px solid rgba(92,45,145,.35); outline-offset:2px; }
 
 /* ===== Mobile ===== */
 @media (max-width: 900px){
-  .browse-layout{ grid-template-columns:1fr; }
-  .content-area{ padding:16px; }
-  .prefs-header{ flex-direction:column; align-items:flex-start; gap:12px; }
+  .preferences-page .content-area{ padding:16px; margin-left:0; width:100%; }
+  .preferences-page .sidebar{ position:static; width:100%; border-right:none; }
+  .preferences-page .prefs-header{ flex-direction:column; align-items:flex-start; gap:12px; }
 }

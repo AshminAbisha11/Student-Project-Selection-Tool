@@ -22,6 +22,9 @@ const MyPreferencesPage = () => {
   const [hasActiveCycle, setHasActiveCycle] = useState(false);
   const [cycleLoading, setCycleLoading] = useState(true);
 
+  // submission state
+  const [submitting, setSubmitting] = useState(false);
+
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
@@ -66,8 +69,9 @@ const MyPreferencesPage = () => {
         method: 'DELETE',
         headers: authHeaders,
       });
-      if (res.ok) await fetchPreferences();
-      else {
+      if (res.ok) {
+        await fetchPreferences();
+      } else {
         const t = await res.text();
         alert(`Delete failed: ${res.status} ${t}`);
       }
@@ -103,6 +107,7 @@ const MyPreferencesPage = () => {
     }
   };
 
+  // ====== NEW: call backend submit endpoint ======
   const submitPreferences = async () => {
     if (!isSubmissionOpen) {
       alert('Submission window is closed.');
@@ -115,12 +120,34 @@ const MyPreferencesPage = () => {
       alert('Please select "Have you contacted the supervisor?" for all preferences.');
       return;
     }
-    // You can hit a real submit endpoint here if you add one later
-    alert('Preferences submitted!');
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/preferences/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+      });
+
+      const text = await res.text(); // handle both JSON & text
+      let payload;
+      try { payload = JSON.parse(text); } catch { payload = { message: text || '' }; }
+
+      if (!res.ok) {
+        throw new Error(payload?.message || `Submit failed: ${res.status}`);
+      }
+
+      // success
+      alert(payload?.message || 'Preferences submitted!');
+      await fetchPreferences(); // refresh to pull is_locked = 1
+    } catch (e) {
+      console.error('Submit error:', e);
+      alert(e.message || 'Submit failed');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   useEffect(() => {
-    // load both status and preferences
     Promise.all([fetchCycleStatus(), fetchPreferences()]).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -142,8 +169,8 @@ const MyPreferencesPage = () => {
       setEditingPref(null);
       return;
     }
-    if (!isSubmissionOpen) {
-      alert('Submission window is closed.');
+    if (!isSubmissionOpen || isLocked) {
+      alert('Submission window is closed or preferences are locked.');
       return;
     }
 
@@ -191,7 +218,7 @@ const MyPreferencesPage = () => {
               updateContactedSupervisor(pref.preference_id, e.target.value)
             }
             required
-            disabled={!isSubmissionOpen}
+            disabled={!isSubmissionOpen || isLocked}
           >
             <option value="">Select</option>
             <option value="Yes">Yes</option>
@@ -200,6 +227,9 @@ const MyPreferencesPage = () => {
           {!isSubmissionOpen && (
             <small style={{ color: '#888' }}>Window closed</small>
           )}
+          {isLocked && (
+            <small style={{ color: '#888', marginLeft: 8 }}>Locked</small>
+          )}
         </div>
       </div>
 
@@ -207,16 +237,16 @@ const MyPreferencesPage = () => {
         <button
           className="btn btn-outline"
           onClick={() => setEditingPref(pref)}
-          disabled={!isSubmissionOpen}
-          title={!isSubmissionOpen ? 'Window closed' : 'Edit order'}
+          disabled={!isSubmissionOpen || isLocked}
+          title={!isSubmissionOpen ? 'Window closed' : isLocked ? 'Locked' : 'Edit order'}
         >
           Edit
         </button>
         <button
           className="btn btn-danger"
           onClick={() => deletePreference(pref.preference_id)}
-          disabled={!isSubmissionOpen}
-          title={!isSubmissionOpen ? 'Window closed' : 'Delete'}
+          disabled={!isSubmissionOpen || isLocked}
+          title={!isSubmissionOpen ? 'Window closed' : isLocked ? 'Locked' : 'Delete'}
         >
           Delete
         </button>
@@ -233,8 +263,8 @@ const MyPreferencesPage = () => {
           className="add-project-btn"
           aria-label="Browse projects to add"
           onClick={() => navigate('/browse-projects')}
-          disabled={!isSubmissionOpen}
-          title={!isSubmissionOpen ? 'Window closed' : 'Add project'}
+          disabled={!isSubmissionOpen || isLocked}
+          title={!isSubmissionOpen ? 'Window closed' : isLocked ? 'Locked' : 'Add project'}
         >
           +
         </button>
@@ -249,92 +279,113 @@ const MyPreferencesPage = () => {
     (p) => p.contacted_supervisor && p.contacted_supervisor !== ''
   );
 
+  // consider the list "locked" if any pref is locked (backend locks all together)
+  const isLocked = preferences.some(p => Number(p.is_locked) === 1);
+
   return (
-    <div className="page-container">
-      <SideBar />
-      <div className="content-area">
-        <HeaderBar />
+    <div className="preferences-page">
+      <div className="page-container">
+        <SideBar />
+        <div className="content-area">
+          <HeaderBar />
 
-        <div className="page-inner">
-          {/* banner for cycle state */}
-          {!cycleLoading && (
-            <div
-              style={{
-                padding: '10px 14px',
-                borderRadius: 10,
-                marginBottom: 12,
-                background: isSubmissionOpen ? '#e9f7ef' : '#fdecea',
-                color: isSubmissionOpen ? '#1e4620' : '#611a15',
-                border: `1px solid ${isSubmissionOpen ? '#b7e0c7' : '#f5c6cb'}`,
-              }}
-            >
-              {hasActiveCycle ? (
-                isSubmissionOpen ? (
-                  <>
-                    <strong>Submission window is OPEN.</strong>{' '}
-                    {cycle?.submission_close_at
-                      ? `Closes: ${new Date(cycle.submission_close_at).toLocaleString()}`
-                      : ''}
-                  </>
+          <div className="page-inner">
+            {/* banner for cycle state */}
+            {!cycleLoading && (
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  marginBottom: 12,
+                  background: isLocked
+                    ? '#eef2ff' // light indigo
+                    : (isSubmissionOpen ? '#e9f7ef' : '#fdecea'),
+                  color: isLocked
+                    ? '#1e2a78'
+                    : (isSubmissionOpen ? '#1e4620' : '#611a15'),
+                  border: `1px solid ${
+                    isLocked ? '#c7d2fe' : (isSubmissionOpen ? '#b7e0c7' : '#f5c6cb')
+                  }`,
+                }}
+              >
+                {isLocked ? (
+                  <strong>Your preferences are submitted and locked.</strong>
+                ) : hasActiveCycle ? (
+                  isSubmissionOpen ? (
+                    <>
+                      <strong>Submission window is OPEN.</strong>{' '}
+                      {cycle?.submission_close_at
+                        ? `Closes: ${new Date(cycle.submission_close_at).toLocaleString()}`
+                        : ''}
+                    </>
+                  ) : (
+                    <>
+                      <strong>Submission window is CLOSED.</strong>{' '}
+                      {cycle?.submission_close_at
+                        ? `Closed: ${new Date(cycle.submission_close_at).toLocaleString()}`
+                        : ''}
+                    </>
+                  )
                 ) : (
-                  <>
-                    <strong>Submission window is CLOSED.</strong>{' '}
-                    {cycle?.submission_close_at
-                      ? `Closed: ${new Date(cycle.submission_close_at).toLocaleString()}`
-                      : ''}
-                  </>
-                )
-              ) : (
-                <strong>No active allocation cycle.</strong>
-              )}
-            </div>
-          )}
-
-          <div className="preferences-wrapper">
-            <div className="prefs-header">
-              <h2>My Preferences</h2>
-              <div className="pref-actions">
-                <span className="pref-count">
-                  Preferences: {filled}/{MAX_PREFERENCES}
-                </span>
-                <button
-                  className="btn btn-primary"
-                  onClick={submitPreferences}
-                  disabled={filled === 0 || !allContactedSet || !isSubmissionOpen}
-                  title={
-                    !isSubmissionOpen
-                      ? 'Window closed'
-                      : !allContactedSet
-                      ? 'Select Yes/No for all items'
-                      : 'Submit preferences'
-                  }
-                >
-                  Submit Preferences
-                </button>
-              </div>
-            </div>
-
-            {loading ? (
-              <p>Loading...</p>
-            ) : (
-              <div className="preferences-grid">
-                {preferences.map((pref) => renderPreferenceCard(pref))}
-                {Array.from({ length: emptySlots }).map((_, i) =>
-                  renderEmptyCard(filled + i)
+                  <strong>No active allocation cycle.</strong>
                 )}
               </div>
             )}
+
+            <div className="preferences-wrapper">
+              <div className="prefs-header">
+                <h2>My Preferences</h2>
+                <div className="pref-actions">
+                  <span className="pref-count">
+                    Preferences: {filled}/{MAX_PREFERENCES}
+                  </span>
+                  <button
+                    className="btn btn-primary"
+                    onClick={submitPreferences}
+                    disabled={
+                      submitting ||
+                      isLocked ||
+                      filled === 0 ||
+                      !allContactedSet ||
+                      !isSubmissionOpen
+                    }
+                    title={
+                      isLocked
+                        ? 'Already submitted'
+                        : !isSubmissionOpen
+                        ? 'Window closed'
+                        : !allContactedSet
+                        ? 'Select Yes/No for all items'
+                        : 'Submit preferences'
+                    }
+                  >
+                    {submitting ? 'Submitting…' : (isLocked ? 'Submitted' : 'Submit Preferences')}
+                  </button>
+                </div>
+              </div>
+
+              {loading ? (
+                <p>Loading...</p>
+              ) : (
+                <div className="preferences-grid">
+                  {preferences.map((pref) => renderPreferenceCard(pref))}
+                  {Array.from({ length: emptySlots }).map((_, i) =>
+                    renderEmptyCard(filled + i)
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      <EditOrderModal
-        open={!!editingPref}
-        pref={editingPref}
-        max={Math.max(1, filled)}
-        onClose={() => !savingOrder && setEditingPref(null)}
-        onSave={handleSaveOrder}
-      />
+        <EditOrderModal
+          open={!!editingPref}
+          pref={editingPref}
+          max={Math.max(1, filled)}
+          onClose={() => !savingOrder && setEditingPref(null)}
+          onSave={handleSaveOrder}
+        />
+      </div>
     </div>
   );
 };

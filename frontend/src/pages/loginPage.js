@@ -1,13 +1,15 @@
+// loginPage.jsx (final, single call)
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './loginPage.css';
 
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// If you later change your server to /auth/login, just flip this:
+const LOGIN_PATH = process.env.REACT_APP_LOGIN_PATH || '/login'; // or '/auth/login'
 
 export default function LoginPage() {
   const navigate = useNavigate();
-
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -19,14 +21,9 @@ export default function LoginPage() {
   };
 
   const safeNavigate = (to) => {
-    // try SPA nav first
     requestAnimationFrame(() => {
-      try {
-        navigate(to, { replace: true });
-      } catch {
-        // absolute fallback
-        window.location.assign(to);
-      }
+      try { navigate(to, { replace: true }); }
+      catch { window.location.assign(to); }
     });
   };
 
@@ -43,36 +40,33 @@ export default function LoginPage() {
     try {
       setSubmitting(true);
 
-      // clear any stale keys
+      // clear stale keys
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      localStorage.removeItem('student'); // legacy key
+      localStorage.removeItem('role');
 
-      const { data } = await axios.post(`${API}/login`, {
-        email: formData.email,
-        password: formData.password,
-      });
+      const { data } = await axios.post(
+        `${API}${LOGIN_PATH}`,
+        { email: formData.email, password: formData.password },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
 
       if (!data?.token || !data?.user) {
         setError('Invalid response from server.');
         return;
       }
 
-      // persist fresh auth
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      // optional: some components like to read just the role
       localStorage.setItem('role', String(data.user.role || '').toLowerCase());
 
       setSuccess(data.message || 'Login successful');
 
       const role = String(data.user.role || '').trim().toLowerCase();
       const target = role === 'supervisor' ? '/supervisor-dashboard' : '/student-dashboard';
-      console.debug('Login role:', role, '→ navigating to', target);
-
       safeNavigate(target);
     } catch (err) {
-      const msg = err.response?.data?.message || 'Login failed';
+      const msg = err?.response?.data?.message || err?.message || 'Login failed';
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -80,10 +74,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div
-      className="login-container"
-      style={{ backgroundImage: "url('/assets/login_background.png')" }}
-    >
+    <div className="login-container" style={{ backgroundImage: "url('/assets/login_background.png')" }}>
       <div className="login-box">
         <div className="login-left">
           <div className="header-title">
@@ -102,6 +93,7 @@ export default function LoginPage() {
               onChange={handleChange}
               autoComplete="email"
               disabled={submitting}
+              required
             />
             <input
               type="password"
@@ -111,12 +103,11 @@ export default function LoginPage() {
               onChange={handleChange}
               autoComplete="current-password"
               disabled={submitting}
+              required
             />
-
             <p className="forgot-password" onClick={() => navigate('/forgot-password')}>
               Forgot password?
             </p>
-
             <button type="submit" className="login-button" disabled={submitting}>
               {submitting ? 'Signing in…' : 'Login'}
             </button>
