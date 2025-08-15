@@ -38,12 +38,62 @@
 .preferences-page .content-area{
   margin-left:220px;
   width:calc(100% - 220px);
-  padding:24px 24px 48px;
+  padding:0 24px 48px;             /* ⬅ removed top padding */
 }
 
 .preferences-page .page-inner{
   max-width:1280px;
   margin:0 auto;
+}
+
+/* ===== Header bar (attached to sidebar) ===== */
+.preferences-page .header-bar{
+  position: sticky;          /* stays visible on scroll */
+  top: 0;
+  z-index: 50;
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+
+  background: var(--purple);
+  color:#fff;
+  padding:14px 16px;
+
+  /* cancel .content-area horizontal padding so it touches the fixed sidebar */
+  margin-left:-24px;         /* must match .content-area { padding-left } */
+  margin-right:-24px;        /* must match .content-area { padding-right } */
+  margin-bottom:12px;        /* space below header instead of top gap */
+
+  border-radius:0;
+  box-shadow:0 2px 12px rgba(0,0,0,.06);
+}
+
+/* optional helpers if your header contains search/actions */
+.preferences-page .header-bar .search{
+  flex:1;
+  max-width:560px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  background:#faf8ff;
+  border:2px solid #e8ddff;
+  border-radius:999px;
+  padding:8px 12px;
+}
+.preferences-page .header-bar .search input{
+  flex:1;
+  border:0;
+  outline:0;
+  background:transparent;
+  color:var(--ink-900);
+  font-size:14px;
+}
+.preferences-page .header-bar .actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
 
 /* ===== Header row (title + actions) ===== */
@@ -205,7 +255,17 @@
 
 /* ===== Mobile ===== */
 @media (max-width: 900px){
-  .preferences-page .content-area{ padding:16px; margin-left:0; width:100%; }
+  .preferences-page .content-area{
+    padding:0 16px 24px;        /* no top padding on mobile either */
+    margin-left:0;
+    width:100%;
+  }
   .preferences-page .sidebar{ position:static; width:100%; border-right:none; }
   .preferences-page .prefs-header{ flex-direction:column; align-items:flex-start; gap:12px; }
+  .preferences-page .header-bar{
+    margin-left:-16px;
+    margin-right:-16px;
+    position: static;           /* optional: turn off sticky on mobile */
+    margin-bottom:12px;
+  }
 }

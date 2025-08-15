@@ -1,83 +1,129 @@
-/* Page Container */
+/* ============================
+   Proposal Page (scoped)
+   ============================ */
 .proposal-page {
+  --purple: #5c2d91;
+  --bg: #f7f5fc;
+  --white: #fff;
+  --ink-900: #2c2c2c;
+  --border: #ece7ff;
+  --shadow: 0 6px 20px rgba(18, 16, 39, 0.06);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Layout wrapper (sidebar + content) */
+.proposal-page .page-container {
   display: flex;
   min-height: 100vh;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #f9f9f9;
+  background: var(--bg);
 }
 
-/* Content beside the Sidebar */
-.proposal-content {
-  flex: 1;
-  padding: 40px 60px;
-  margin-left: 240px; /* Adjust to match sidebar width */
-  background-color: #ffffff;
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.03);
+/* Content next to the fixed sidebar */
+.proposal-page .content-area {
+  margin-left: 220px;                 /* must match Sidebar width */
+  width: calc(100% - 220px);
+  padding: 0 24px 48px;               /* ⬅ removed TOP padding to kill the gap */
 }
 
-/* Heading */
-.proposal-content h2 {
+/* Inner page container */
+.proposal-page .page-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  background: var(--white);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+/* HeaderBar: attach to sidebar and viewport top */
+.proposal-page .header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+
+  /* cancel the horizontal padding of .content-area so it touches the sidebar */
+  margin-left: -24px;
+  margin-right: -24px;
+
+  border-radius: 0;
+  /* optional spacing below the header */
+  margin-bottom: 16px;
+  /* rest of visual styles come from headerBar.css */
+}
+
+/* Title */
+.proposal-page h2 {
+  margin: 4px 0 18px;
+  color: var(--ink-900);
   font-size: 28px;
-  margin-bottom: 30px;
-  color: #333;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-/* Form Layout */
+/* -------- Form -------- */
 .proposal-form {
-  max-width: 600px;
+  max-width: 720px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
-/* Form Labels */
 .proposal-form label {
-  font-weight: 500;
-  color: #444;
+  font-weight: 600;
+  color: #333;
 }
 
-/* Input Elements */
 .proposal-form input[type="text"],
 .proposal-form input[type="file"],
 .proposal-form textarea,
 .proposal-form select {
   padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
+  border-radius: 10px;
+  border: 1px solid #d7d2f8;
+  background: #faf8ff;
   font-size: 15px;
-  background-color: #fdfdfd;
-  transition: border-color 0.2s ease;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
 
-/* Input Focus */
-.proposal-form input:focus,
+.proposal-form input[type="text"]:focus,
+.proposal-form input[type="file"]:focus,
 .proposal-form textarea:focus,
 .proposal-form select:focus {
   outline: none;
-  border-color: #6a5acd;
+  border-color: var(--purple);
+  box-shadow: 0 0 0 4px rgba(92,45,145,.12);
+  background: #fff;
 }
 
-/* Textarea Specifics */
-.proposal-form textarea {
-  resize: vertical;
-  min-height: 100px;
-}
+.proposal-form textarea { resize: vertical; min-height: 120px; }
 
-/* Submit Button */
 .proposal-form button[type="submit"] {
   padding: 12px 18px;
-  background-color: #6a5acd;
-  color: white;
+  background: var(--purple);
+  color: #fff;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: filter .15s, transform .06s;
+  box-shadow: 0 4px 12px rgba(92,45,145,.18);
 }
+.proposal-form button[type="submit"]:hover { filter: brightness(.96); }
+.proposal-form button[type="submit"]:active { transform: translateY(1px); }
 
-/* Button Hover */
-.proposal-form button[type="submit"]:hover {
-  background-color: #5943c2;
+.proposal-form small { color: #6b4caf; font-weight: 600; }
+
+/* -------- Responsive -------- */
+@media (max-width: 900px) {
+  .proposal-page .content-area {
+    margin-left: 0;
+    width: 100%;
+    padding: 0 16px 24px;           
+  }
+  .proposal-page .page-inner { padding: 16px; }
+  .proposal-page .header-bar {
+    margin-left: -16px;              
+    margin-right: -16px;
+    position: static;                 
+  }
 }
