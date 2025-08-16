@@ -1,12 +1,47 @@
+// StudentDashboard.js
 import React, { useEffect, useState, useCallback } from 'react';
-import './studentDashboard.css';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import './studentDashboard.css';
 import Sidebar from '../components/sideBar';
 import ProfileDropdown from '../components/profileDropdown';
-import StudentProposalModal from '../components/studentProposalModal';   // <-- add this
+import StudentProposalModal from '../components/studentProposalModal';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+/* ---------- Portal modal for Preferred Projects ---------- */
+function PreferencesModal({ open, onClose, items, loading, error }) {
+  if (!open) return null;
+
+  return createPortal(
+    <div className="ppm-overlay" role="dialog" aria-modal="true" aria-label="Preferred Projects" onClick={onClose}>
+      <div className="ppm-panel" onClick={(e) => e.stopPropagation()}>
+        <button className="ppm-close" onClick={onClose} aria-label="Close">✕</button>
+        <h3 className="ppm-title">Preferred Projects</h3>
+
+        {loading ? (
+          <p>Loading…</p>
+        ) : error ? (
+          <p style={{ color: '#b00' }}>{error}</p>
+        ) : items.length === 0 ? (
+          <p>You haven’t added any preferences yet.</p>
+        ) : (
+          <div className="ppm-list">
+            {items.map((pref, index) => (
+              <div className="ppm-card" key={pref.preference_id ?? `${pref.project_id}-${index}`}>
+                <h4>{index + 1}. {pref.title}</h4>
+                {pref.description && <p>{pref.description}</p>}
+                {pref.supervisor_name && <p className="ppm-meta">Supervisor: {pref.supervisor_name}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
@@ -16,22 +51,17 @@ export default function StudentDashboard() {
   });
 
   const token = localStorage.getItem('token');
-  const user = (() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
-    catch { return null; }
-  })();
+  const user = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
   const userId = user?.user_id;
   const studentName = user?.name || 'Student';
 
   const [showPrefModal, setShowPrefModal] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
 
-  // data for preferences modal (we keep this one inline)
   const [preferences, setPreferences] = useState([]);
   const [prefLoading, setPrefLoading] = useState(false);
   const [prefErr, setPrefErr] = useState('');
 
-  /* Auth gate */
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -42,10 +72,8 @@ export default function StudentDashboard() {
     }
   }, [navigate, token, user]);
 
-  /* Dashboard stats */
   useEffect(() => {
     if (!userId || !token) return;
-
     let cancelled = false;
     (async () => {
       try {
@@ -61,11 +89,9 @@ export default function StudentDashboard() {
         }
       }
     })();
-
     return () => { cancelled = true; };
   }, [userId, token, navigate]);
 
-  /* ESC to close either modal */
   const onEscToClose = useCallback((e) => {
     if (e.key === 'Escape') {
       setShowPrefModal(false);
@@ -79,7 +105,6 @@ export default function StudentDashboard() {
     }
   }, [showPrefModal, showProposalModal, onEscToClose]);
 
-  /* Preferences modal loader */
   const handleShowPreferences = async () => {
     setPrefErr('');
     setPrefLoading(true);
@@ -96,7 +121,6 @@ export default function StudentDashboard() {
     }
   };
 
-  /* Proposals modal (fetch inside the modal component) */
   const handleShowProposals = () => setShowProposalModal(true);
 
   return (
@@ -115,26 +139,12 @@ export default function StudentDashboard() {
         </div>
 
         <div className="dashboard-cards">
-          <div
-            className="dashboard-card"
-            onClick={handleShowPreferences}
-            style={{ cursor: 'pointer' }}
-            role="button"
-            aria-haspopup="dialog"
-            aria-label="View Preferred Projects"
-          >
+          <div className="dashboard-card" onClick={handleShowPreferences} role="button" aria-haspopup="dialog" aria-label="View Preferred Projects">
             <h4>{dashboardData.stats.preferencesSubmitted}</h4>
             <p>Preferred Projects</p>
           </div>
 
-          <div
-            className="dashboard-card"
-            onClick={handleShowProposals}
-            style={{ cursor: 'pointer' }}
-            role="button"
-            aria-haspopup="dialog"
-            aria-label="View Proposals Sent"
-          >
+          <div className="dashboard-card" onClick={handleShowProposals} role="button" aria-haspopup="dialog" aria-label="View Proposals Sent">
             <h4>{dashboardData.stats.proposalsSent}</h4>
             <p>Proposals Sent</p>
           </div>
@@ -154,40 +164,16 @@ export default function StudentDashboard() {
         </div>
       </div>
 
-      {/* Preferences Modal (inline) */}
-      {showPrefModal && (
-        <div
-          className="modal-overlay"
-          onClick={() => setShowPrefModal(false)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="modal-content styled-card-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowPrefModal(false)} aria-label="Close">✕</button>
-            <h3 className="modal-title">Preferred Projects</h3>
+      {/* Preferred Projects (portal) */}
+      <PreferencesModal
+        open={showPrefModal}
+        onClose={() => setShowPrefModal(false)}
+        items={preferences}
+        loading={prefLoading}
+        error={prefErr}
+      />
 
-            {prefLoading ? (
-              <p>Loading…</p>
-            ) : prefErr ? (
-              <p style={{ color: '#b00' }}>{prefErr}</p>
-            ) : preferences.length === 0 ? (
-              <p>You haven’t added any preferences yet.</p>
-            ) : (
-              <div className="project-card-container">
-                {preferences.map((pref, index) => (
-                  <div className="project-card" key={pref.preference_id ?? `${pref.project_id}-${index}`}>
-                    <h4>{index + 1}. {pref.title}</h4>
-                    {pref.description && <p className="project-description">{pref.description}</p>}
-                    {pref.supervisor_name && <p className="supervisor-name">Supervisor: {pref.supervisor_name}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Proposals Modal (separate component) */}
+      {/* Proposals (already using a portal component) */}
       <StudentProposalModal
         isOpen={showProposalModal}
         onClose={() => setShowProposalModal(false)}
