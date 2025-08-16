@@ -81,6 +81,7 @@ app.use('/feedback', feedbackRoutes);
 app.use('/allocations', allocationRoutes);
 app.use('/cycle', cycleRoutes);
 app.use('/supervisor', supervisorDashboardRoutes);
+app.use('/supervisor-list', supervisorRoutes);
 
 /* ---------------------------
    Start server

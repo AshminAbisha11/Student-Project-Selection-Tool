@@ -51,3 +51,47 @@ exports.getReceivedProposals = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch proposals' });
   }
 };
+
+// add this below your other exports
+exports.decideProposal = async (req, res) => {
+  try {
+    const supervisorId = req.user?.user_id;
+    const proposalId = Number(req.params.id);
+    const { status, reason } = req.body || {};
+
+    if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+    if (!proposalId) return res.status(400).json({ message: 'proposalId required' });
+
+    const allowed = new Set(['accepted', 'rejected', 'under_review', 'submitted']);
+    if (!allowed.has((status || '').toLowerCase()))
+      return res.status(400).json({ message: 'Invalid status' });
+
+    // ensure the proposal belongs to this supervisor
+    const [rows] = await db.query(
+      `SELECT proposal_id FROM proposals WHERE proposal_id=? AND supervisor_id=?`,
+      [proposalId, supervisorId]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Not found' });
+
+    // optional note column (add once if you don’t have it yet)
+    // ALTER TABLE proposals ADD COLUMN decision_note TEXT NULL AFTER status;
+
+    await db.query(
+      `UPDATE proposals 
+         SET status = ?, decision_note = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE proposal_id = ? AND supervisor_id = ?`,
+      [status.toLowerCase(), reason || null, proposalId, supervisorId]
+    );
+
+    const [[updated]] = await db.query(
+      `SELECT proposal_id, status, decision_note AS reason, updated_at 
+         FROM proposals WHERE proposal_id=?`,
+      [proposalId]
+    );
+
+    res.json(updated);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Failed to update proposal status' });
+  }
+};
