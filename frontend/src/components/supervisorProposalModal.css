@@ -1,0 +1,60 @@
+/* Backdrop */
+.spm-backdrop{
+  position: fixed; inset: 0; background: rgba(18,16,39,.35);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+}
+
+/* Card */
+.spm-card{
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: #fff; border-radius: 16px; padding: 18px;
+  box-shadow: 0 16px 60px rgba(40,20,90,.25);
+  color: #0b0b0b !important;         /* stronger dark */
+  line-height: 1.5;
+}
+
+/* Header */
+.spm-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.spm-head h3{ margin: 0; color:#000 !important; font-weight:700; }
+.spm-x{ border:0; background:transparent; font-size:20px; cursor:pointer; color:#222; }
+.spm-x:hover{ color:#000; }
+
+/* Meta + labels + body text — force dark */
+.spm-card .spm-meta{
+  display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr));
+  gap:8px 16px; margin:8px 0 10px;
+  color:#0d0d0d !important;
+}
+.spm-card .spm-meta strong{ color:#000 !important; }
+.spm-card .spm-meta em{ color:#0d0d0d !important; }  /* those purple-ish italics */
+.spm-card .spm-label{ margin-top:8px; font-size:13px; color:#0d0d0d !important; }
+
+/* Description box */
+.spm-msg{
+  background:#fbfaff; border:1px solid #eee8ff;
+  padding:10px 12px; border-radius:10px;
+  color:#0d0d0d !important;
+}
+
+/* Divider */
+.spm-divider{ height:1px; background:#efeafe; margin:16px 0; }
+
+/* Actions */
+.spm-actions{ display:flex; align-items:center; gap:10px; }
+.spm-spacer{ flex:1; }
+
+.spm-btn{ border:0; border-radius:10px; padding:8px 12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; }
+.spm-btn--ghost{ background:#f1f1f1; color:#0d0d0d !important; }
+.spm-btn--ghost:hover{ background:#e4e4e4; }
+.spm-btn--ok{ background:#4ade80; color:#052e18; }
+.spm-btn--warn{ background:#fecaca; color:#611017; }
+
+/* Reason textarea */
+.spm-reason{ margin-top:12px; }
+.spm-reason textarea{
+  width:100%; resize:vertical; padding:8px 10px; border-radius:10px;
+  border:1px solid #e6dfff; background:#fbfaff; color:#0d0d0d !important;
+}
+.spm-reason textarea::placeholder{ color:#555 !important; }

@@ -1,12 +1,33 @@
 // controllers/preferenceController.js
 const db = require('../config/db');
 
-/**
+const VALID_CONTACT = ['Yes', 'No'];
+
+/* -------------------------------------------------------
+ * Helpers
+ * ----------------------------------------------------- */
+async function repackOrders(studentId, cycleId) {
+  const [rows] = await db.query(
+    `SELECT preference_id
+       FROM preferences
+      WHERE student_id = ? AND cycle_id = ?
+      ORDER BY preference_order ASC`,
+    [studentId, cycleId]
+  );
+  for (let i = 0; i < rows.length; i++) {
+    const id = rows[i].preference_id;
+    // pack to 1..N
+    await db.query(
+      `UPDATE preferences SET preference_order = ? WHERE preference_id = ?`,
+      [i + 1, id]
+    );
+  }
+}
+
+/* =======================================================
  * GET /preferences
- * Return the student's preferences WITH project_id so the UI can
- * map project_id -> preference_id (needed for delete).
- * Includes contacted_supervisor.
- */
+ * Return the student's preferences (include is_locked!)
+ * ===================================================== */
 exports.getPreferencesByStudent = async (req, res) => {
   const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
@@ -15,8 +36,10 @@ exports.getPreferencesByStudent = async (req, res) => {
     SELECT
       p.preference_id,
       p.preference_order,
-      p.project_id,                    -- important for UI remove
-      p.contacted_supervisor,          -- 'Yes' | 'No'
+      p.project_id,
+      p.contacted_supervisor,      -- 'Yes' | 'No'
+      p.cycle_id,
+      p.is_locked,                 -- << IMPORTANT for FE
       pr.title,
       pr.description,
       pr.supervisor_name
@@ -35,47 +58,70 @@ exports.getPreferencesByStudent = async (req, res) => {
   }
 };
 
+/* =======================================================
+ * GET /preferences/submission  (or /preferences/submitted)
+ * Read-only status so FE can show Submitted / Resubmit text
+ * ===================================================== */
+exports.getSubmissionStatus = async (req, res) => {
+  try {
+    const studentId = req.user?.user_id;
+    if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-/**
+    // latest submission across cycles (or add WHERE cycle_id = ? if you pass one)
+    const [rows] = await db.query(
+      `SELECT MAX(submitted_at) AS submitted_at
+         FROM preference_submissions
+        WHERE student_id = ?`,
+      [studentId]
+    );
+
+    const submitted_at = rows?.[0]?.submitted_at || null;
+    res.json({ submitted: Boolean(submitted_at), submitted_at });
+  } catch (e) {
+    console.error('getSubmissionStatus error:', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/* =======================================================
  * POST /preferences
- * Body: { project_id, contacted_supervisor }
- * Adds a preference (max 5). Saves active cycle_id from req.cycle (set by submissionWindow).
- */
+ * Body: { project_id }
+ * Adds a preference (max 5). Defaults contacted_supervisor = 'No'.
+ * Saves active cycle_id from req.cycle (set by submissionWindow).
+ * ===================================================== */
 exports.addPreference = async (req, res) => {
   const student_id = req.user?.user_id;
-  const { project_id, contacted_supervisor } = req.body;
+  const { project_id } = req.body;
   const cycleId = req.cycle?.cycle_id; // attached by submissionWindow
 
   if (!student_id) return res.status(401).json({ message: 'Unauthorized' });
   if (!cycleId)   return res.status(403).json({ message: 'No active allocation cycle.' });
   if (!project_id) return res.status(400).json({ message: 'project_id is required' });
 
-  const validValues = ['Yes', 'No'];
-  if (!contacted_supervisor || !validValues.includes(contacted_supervisor)) {
-    return res.status(400).json({ message: "contacted_supervisor is required and must be 'Yes' or 'No'" });
-  }
-
   try {
-    // existing preferences for this student (limit 5 total)
+    // Only check within this cycle
     const [existing] = await db.query(
-      `SELECT project_id FROM preferences WHERE student_id = ? ORDER BY preference_order ASC`,
-      [student_id]
+      `SELECT project_id
+         FROM preferences
+        WHERE student_id = ? AND cycle_id = ?
+        ORDER BY preference_order ASC`,
+      [student_id, cycleId]
     );
 
     if (existing.length >= 5) {
       return res.status(400).json({ message: 'You can only add up to 5 preferences.' });
     }
-
     if (existing.some(p => p.project_id === project_id)) {
       return res.status(400).json({ message: 'This project is already in your preferences.' });
     }
 
     const preference_order = existing.length + 1;
+    const contacted_supervisor = 'No';
 
     const [result] = await db.query(
       `INSERT INTO preferences
-         (student_id, project_id, preference_order, contacted_supervisor, cycle_id)
-       VALUES (?, ?, ?, ?, ?)`,
+         (student_id, project_id, preference_order, contacted_supervisor, cycle_id, is_locked)
+       VALUES (?, ?, ?, ?, ?, 0)`,
       [student_id, project_id, preference_order, contacted_supervisor, cycleId]
     );
 
@@ -86,10 +132,10 @@ exports.addPreference = async (req, res) => {
       preference_order,
       contacted_supervisor,
       cycle_id: cycleId,
+      is_locked: 0,
     });
   } catch (err) {
     console.error('Error adding preference:', err);
-    // surface unique violation clearly (if any)
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Duplicate preference for this project.' });
     }
@@ -97,12 +143,11 @@ exports.addPreference = async (req, res) => {
   }
 };
 
-
-/**
+/* =======================================================
  * PUT /preferences
  * Body: { preference_id, preference_order }
  * Updates order; enforces ownership.
- */
+ * ===================================================== */
 exports.updatePreferenceOrder = async (req, res) => {
   const studentId = req.user?.user_id;
   const { preference_id, preference_order } = req.body;
@@ -112,14 +157,14 @@ exports.updatePreferenceOrder = async (req, res) => {
     return res.status(400).json({ message: 'preference_id and preference_order are required' });
   }
 
-  const sql = `
-    UPDATE preferences
-    SET preference_order = ?
-    WHERE preference_id = ? AND student_id = ?
-  `;
-
   try {
-    const [r] = await db.query(sql, [preference_order, preference_id, studentId]);
+    const [r] = await db.query(
+      `UPDATE preferences
+          SET preference_order = ?
+        WHERE preference_id = ? AND student_id = ?`,
+      [preference_order, preference_id, studentId]
+    );
+
     if (r.affectedRows === 0) {
       return res.status(404).json({ message: 'Preference not found' });
     }
@@ -130,19 +175,17 @@ exports.updatePreferenceOrder = async (req, res) => {
   }
 };
 
-
-/**
+/* =======================================================
  * PATCH /preferences/contacted
  * Body: { preference_id, contacted_supervisor }
- * Toggle the 'Have you contacted the supervisor?' flag; enforces ownership.
- */
+ * Toggle 'Have you contacted the supervisor?' flag.
+ * ===================================================== */
 exports.updateContactedSupervisor = async (req, res) => {
   const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
   let { preference_id, contacted_supervisor } = req.body;
 
-  // normalize
   const v = String(contacted_supervisor || '').trim().toLowerCase();
   if (v !== 'yes' && v !== 'no') {
     return res.status(400).json({ message: "contacted_supervisor must be 'Yes' or 'No'" });
@@ -156,8 +199,8 @@ exports.updateContactedSupervisor = async (req, res) => {
   try {
     const [result] = await db.query(
       `UPDATE preferences
-         SET contacted_supervisor = ?
-       WHERE preference_id = ? AND student_id = ?`,
+          SET contacted_supervisor = ?
+        WHERE preference_id = ? AND student_id = ?`,
       [contacted_supervisor, preference_id, studentId]
     );
 
@@ -172,11 +215,10 @@ exports.updateContactedSupervisor = async (req, res) => {
   }
 };
 
-
-/**
+/* =======================================================
  * DELETE /preferences/:preferenceId
- * Deletes a preference and compacts the remaining order; enforces ownership.
- */
+ * Deletes a preference and compacts the remaining order (cycle-scoped).
+ * ===================================================== */
 exports.deletePreference = async (req, res) => {
   const preferenceId = req.params.preferenceId;
   const studentId = req.user?.user_id;
@@ -185,7 +227,16 @@ exports.deletePreference = async (req, res) => {
   if (!preferenceId) return res.status(400).json({ message: 'preferenceId is required' });
 
   try {
-    // Delete the chosen preference (only for this student)
+    // find its cycle first
+    const [[row]] = await db.query(
+      `SELECT cycle_id FROM preferences WHERE preference_id = ? AND student_id = ?`,
+      [preferenceId, studentId]
+    );
+    if (!row) {
+      return res.status(404).json({ message: 'Preference not found' });
+    }
+    const cycleId = row.cycle_id;
+
     const [del] = await db.query(
       `DELETE FROM preferences WHERE preference_id = ? AND student_id = ?`,
       [preferenceId, studentId]
@@ -195,23 +246,115 @@ exports.deletePreference = async (req, res) => {
       return res.status(404).json({ message: 'Preference not found' });
     }
 
-    // Re-pack orders 1..n for this student
-    const [remaining] = await db.query(
-      `SELECT preference_id FROM preferences WHERE student_id = ? ORDER BY preference_order ASC`,
-      [studentId]
-    );
-
-    for (let i = 0; i < remaining.length; i++) {
-      const id = remaining[i].preference_id;
-      await db.query(
-        `UPDATE preferences SET preference_order = ? WHERE preference_id = ?`,
-        [i + 1, id]
-      );
-    }
-
+    await repackOrders(studentId, cycleId);
     return res.status(200).json({ message: 'Preference deleted and reordered successfully' });
   } catch (err) {
     console.error('Error deleting/reordering preference:', err);
     return res.status(500).json({ error: 'Database error' });
+  }
+};
+
+/* =======================================================
+ * POST /preferences/submit
+ * Final submission from My Preferences page.
+ * - Validates contacted_supervisor values
+ * - Snapshots current list into submission tables
+ * - Locks preferences (is_locked = 1)
+ * ===================================================== */
+exports.submitPreferences = async (req, res) => {
+  const studentId = req.user?.user_id;
+  const cycleId = req.cycle?.cycle_id; // set by your active-cycle middleware
+
+  if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
+  if (!cycleId)   return res.status(403).json({ message: 'No active allocation cycle.' });
+
+  const conn = await db.getConnection(); // mysql2 pool connection
+  try {
+    await conn.beginTransaction();
+
+    // 1) Read current preferences for this cycle
+    const [prefs] = await conn.query(
+      `SELECT preference_id, project_id, preference_order, contacted_supervisor, is_locked
+         FROM preferences
+        WHERE student_id = ? AND cycle_id = ?
+        ORDER BY preference_order ASC`,
+      [studentId, cycleId]
+    );
+
+    if (prefs.length === 0) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Add at least one preference before submitting.' });
+    }
+
+    // Already locked => idempotent success
+    const alreadyLocked = prefs.every(p => Number(p.is_locked) === 1);
+    if (alreadyLocked) {
+      await conn.rollback();
+      return res.status(200).json({ message: 'Preferences already submitted.' });
+    }
+
+    // 2) Validate contacted flags
+    const bad = prefs.find(p => !VALID_CONTACT.includes(p.contacted_supervisor));
+    if (bad) {
+      await conn.rollback();
+      return res.status(400).json({
+        message: "Please set 'Have you contacted the supervisor?' to 'Yes' or 'No' for all preferences."
+      });
+    }
+
+    // 3) Upsert submission header (one per student/cycle)
+    await conn.query(
+      `INSERT INTO preference_submissions (student_id, cycle_id, submitted_at, processed)
+       VALUES (?, ?, NOW(), 0)
+       ON DUPLICATE KEY UPDATE submitted_at = NOW(), processed = 0`,
+      [studentId, cycleId]
+    );
+
+    // 4) Get submission_id
+    const [[sub]] = await conn.query(
+      `SELECT submission_id
+         FROM preference_submissions
+        WHERE student_id = ? AND cycle_id = ?`,
+      [studentId, cycleId]
+    );
+    const submissionId = sub.submission_id;
+
+    // 5) Rewrite snapshot items
+    await conn.query(
+      `DELETE FROM preference_submission_items WHERE submission_id = ?`,
+      [submissionId]
+    );
+
+    const values = prefs.map(p => [
+      submissionId,
+      p.project_id,
+      p.preference_order,
+      p.contacted_supervisor
+    ]);
+
+    // bulk insert (mysql2 format)
+    await conn.query(
+      `INSERT INTO preference_submission_items
+         (submission_id, project_id, pref_order, contacted_supervisor)
+       VALUES ?`,
+      [values]
+    );
+
+    // 6) Lock the editable prefs so the student can’t change after submit
+    await conn.query(
+      `UPDATE preferences
+          SET is_locked = 1
+        WHERE student_id = ? AND cycle_id = ?`,
+      [studentId, cycleId]
+    );
+
+    await conn.commit();
+    return res.json({ message: 'Preferences submitted successfully.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error submitting preferences:', err);
+    return res.status(500).json({ error: 'Database error' });
+  } finally {
+    conn.release?.();
   }
 };

@@ -106,7 +106,7 @@ export default function SupervisorDashboardPage() {
 
           <div
             className="dashboard-card"
-            onClick={() => navigate('/supervisor/proposals')}
+            onClick={() => navigate('/supervisor-list/proposals')}
             style={{ cursor: 'pointer' }}
           >
             <h4>{loading ? '—' : overview.pendingProposals}</h4>
@@ -126,7 +126,7 @@ export default function SupervisorDashboardPage() {
         <div className="dashboard-actions">
           <h4>Quick Actions</h4>
           <button onClick={() => navigate('/supervisor/create-project')}>Add new Project</button>
-          <button onClick={() => navigate('/supervisor/proposals')}>Review Proposals</button>
+          <button onClick={() => navigate('/supervisor-list/proposals')}>Review Proposals</button>
           <button onClick={() => navigate('/supervisor/allocated')}>View Allocated Students</button>
           <button onClick={() => navigate('/my-projects')}>My Projects</button>
         </div>
