@@ -1,0 +1,66 @@
+.sv-proposals-page { padding: 0 24px 24px; }
+.sv-proposals-body { max-width: 980px; margin: 16px auto; }
+
+.sv-proposals-skel,
+.sv-proposals-empty,
+.sv-proposals-error {
+  padding: 20px;
+  border-radius: 14px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.sv-proposals-skel { background: #faf9ff; border: 1px dashed #e2e2f3; color: #6a6790; }
+.sv-proposals-empty { background: #f8fff6; border: 1px dashed #cfe7c9; color: #567256; }
+.sv-proposals-error { background: #fff3f3; border: 1px solid #ffd0d3; color: #a12b36; }
+
+.sv-proposals-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
+
+.sv-prop-card {
+  background: #fff;
+  border: 1px solid rgba(125,86,197,0.12);
+  border-radius: 16px;
+  box-shadow: 0 6px 22px rgba(93, 50, 170, 0.08);
+  padding: 16px;
+}
+
+.sv-prop-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sv-prop-title { margin: 0; font-size: 18px; color: #2b2257; }
+
+.sv-prop-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.sv-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.sv-chip--source { background: #eef2ff; color: #2b3a93; border-color: #dfe5ff; }
+.sv-chip--status { text-transform: capitalize; }
+.sv-chip--submitted { background: #fff6e6; color: #8a5a00; border-color: #ffe3ad; }
+.sv-chip--under_review { background: #f0f7ff; color: #1a5ba0; border-color: #cfe5ff; }
+.sv-chip--accepted { background: #eafbf0; color: #1f7a46; border-color: #c6f1d8; }
+.sv-chip--rejected { background: #ffe9ea; color: #a32834; border-color: #ffd0d3; }
+
+.sv-prop-meta {
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  margin-top: 10px; color: #6b688f; font-size: 13px;
+}
+
+.sv-prop-msg { margin: 12px 0 0; color: #3f376b; line-height: 1.45; }
+
+.sv-prop-actions { margin-top: 12px; display: flex; gap: 10px; }
+
+.sv-btn {
+  border: 0; border-radius: 10px; padding: 8px 12px; cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center;
+}
+.sv-btn--ghost { background: #f5f5ff; color: #2e2a5d; }
+.sv-btn--ok { background: #4ade80; color: #052e18; }
+.sv-btn--warn { background: #fecaca; color: #611017; }

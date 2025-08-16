@@ -19,6 +19,7 @@ import MyProposalPage from './pages/myProposalPage';
 import SupervisorDashboardPage from './pages/supervisorDashboardPage';
 import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
 import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';
+import SupervisorProposalsPage from './pages/supervisorProposalPage'; 
 
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
@@ -95,7 +96,6 @@ function RootRedirect() {
         setOk(res.ok);
         if (!res.ok) logoutClient();
       } catch {
-        // network error -> treat as not ok (force re-auth)
         logoutClient();
         setOk(false);
       } finally {
@@ -106,17 +106,13 @@ function RootRedirect() {
     return () => controller.abort();
   }, []);
 
-  if (checking) {
-    return <div style={{ padding: 24 }}>Checking session…</div>;
-  }
-
+  if (checking) return <div style={{ padding: 24 }}>Checking session…</div>;
   if (!ok) return <Navigate to="/login" replace />;
 
   const role = getUser()?.role?.toLowerCase();
   if (role === 'supervisor') return <Navigate to="/supervisor-dashboard" replace />;
   if (role === 'student') return <Navigate to="/student-dashboard" replace />;
 
-  // unknown role -> reset
   logoutClient();
   return <Navigate to="/login" replace />;
 }
@@ -171,12 +167,11 @@ function App() {
         <Route
           path="/my-proposals"
           element={
-        <ProtectedRoute roles={['student']}>
-        <MyProposalPage />
-       </ProtectedRoute>
-        }
-       />
-
+            <ProtectedRoute roles={['student']}>
+              <MyProposalPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Supervisor Routes (protected) */}
         <Route
@@ -208,6 +203,16 @@ function App() {
           element={
             <ProtectedRoute roles={['supervisor']}>
               <SuperVisorMyProjectsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* NEW: Supervisor → Received Proposals */}
+        <Route
+          path="/supervisor-list/proposals"
+          element={
+            <ProtectedRoute roles={['supervisor']}>
+              <SupervisorProposalsPage />
             </ProtectedRoute>
           }
         />

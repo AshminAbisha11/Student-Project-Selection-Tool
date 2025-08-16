@@ -23,7 +23,7 @@ export default function SupervisorNav() {
         <NavLink to="/my-projects" className="sv-link">
           My Projects
         </NavLink>
-        <NavLink to="/supervisor/proposals" className="sv-link">
+        <NavLink to="/supervisor-list/proposals" className="sv-link">
           Received Proposals
         </NavLink>
         <NavLink to="/logout" className="sv-link sv-link--danger">
