@@ -6,6 +6,16 @@ import './supervisorNav.css';
 export default function SupervisorNav() {
   return (
     <aside className="sv-sidebar">
+      {/* Logo / brand */}
+      <NavLink to="/supervisor-dashboard" className="sv-logo">
+        <img src="/assets/aston_logo.png" alt="Aston University" />
+        <div className="sv-brand">
+          <div className="sv-brand-title">Aston University</div>
+          <div className="sv-brand-sub">Supervisor Portal</div>
+        </div>
+      </NavLink>
+
+      {/* Nav */}
       <nav className="sv-nav">
         <NavLink to="/supervisor/allocated" className="sv-link">
           Allocated Students

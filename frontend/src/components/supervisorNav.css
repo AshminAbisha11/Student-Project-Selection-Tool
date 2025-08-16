@@ -10,7 +10,7 @@
   top: 0;
 }
 
-/* logo */
+/* logo / brand block */
 .sv-logo{
   display: flex;
   align-items: center;
@@ -18,9 +18,34 @@
   padding: 10px 8px 18px;
   margin-bottom: 12px;
   border-bottom: 1px solid rgba(0,0,0,0.06);
+  text-decoration: none;
   cursor: pointer;
 }
-.sv-logo img{ height: 28px; }
+
+.sv-logo img{
+  height: 36px; /* adjust if needed (28–44px works well) */
+  display: block;
+}
+
+.sv-brand{
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.sv-brand-title{
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: .2px;
+  color: #2c2c54;
+}
+
+.sv-brand-sub{
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #7b2cbf;
+}
 
 /* nav */
 .sv-nav{
