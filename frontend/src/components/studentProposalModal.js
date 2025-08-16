@@ -1,94 +1,96 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
+import './studentProposalModal.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-export default function ProposalsModal({ open, onClose }) {
+export default function StudentProposalModal({ isOpen, onClose, userId, token }) {
   const [proposals, setProposals] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
 
-  const token = localStorage.getItem('token');
-  const authHeaders = useMemo(
-    () => ({ Authorization: token ? `Bearer ${token}` : '' }),
-    [token]
-  );
-  const student = (() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
-    catch { return null; }
-  })();
-  const studentId = student?.user_id;
-
+  // Close on ESC
+  const onEsc = useCallback((e) => { if (e.key === 'Escape') onClose(); }, [onClose]);
   useEffect(() => {
-    if (!open) return;
-    if (!studentId) {
-      setErr('No student found in session.');
-      return;
-    }
+    if (!isOpen) return;
+    document.addEventListener('keydown', onEsc);
+    document.body.classList.add('modal-open');   // prevent page scroll
+    return () => {
+      document.removeEventListener('keydown', onEsc);
+      document.body.classList.remove('modal-open');
+    };
+  }, [isOpen, onEsc]);
+
+  // Fetch proposals when opened
+  useEffect(() => {
+    if (!isOpen || !userId || !token) return;
+
+    let cancel = false;
     (async () => {
+      setError('');
       setLoading(true);
-      setErr('');
       try {
-        const { data } = await axios.get(`${API}/proposals/${studentId}`, {
-          headers: authHeaders,
+        const res = await axios.get(`${API}/proposals/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { _ts: Date.now() }, // cache-buster
+          validateStatus: s => (s >= 200 && s < 300) || s === 304,
         });
-        setProposals(Array.isArray(data) ? data : []);
-      } catch (e) {
-        console.error(e);
-        setErr('Could not load your proposals.');
+        if (!cancel && res.status !== 304 && Array.isArray(res.data)) {
+          setProposals(res.data);
+        }
+      } catch {
+        if (!cancel) setError('Failed to load proposals.');
       } finally {
-        setLoading(false);
+        if (!cancel) setLoading(false);
       }
     })();
-  }, [open, studentId, authHeaders]);
 
-  if (!open) return null;
+    return () => { cancel = true; };
+  }, [isOpen, userId, token]);
 
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-icon">📄</div>
-        <h3 className="modal-title">Proposals you sent</h3>
+  if (!isOpen) return null;
+
+  // Render OUTSIDE the dashboard stacking context
+  return createPortal(
+    <div className="spm-overlay" role="dialog" aria-modal="true" aria-label="Proposals Sent" onClick={onClose}>
+      <div className="spm-panel" onClick={(e) => e.stopPropagation()}>
+        <button className="spm-close" onClick={onClose} aria-label="Close">✕</button>
+        <h3 className="spm-title">Proposals Sent</h3>
 
         {loading ? (
-          <p className="modal-text">Loading…</p>
-        ) : err ? (
-          <p className="modal-text" style={{ color: '#b00' }}>{err}</p>
+          <p>Loading…</p>
+        ) : error ? (
+          <p style={{ color: '#b00' }}>{error}</p>
         ) : proposals.length === 0 ? (
-          <p className="modal-text">You haven’t submitted any proposals yet.</p>
+          <p>You haven’t submitted any proposals yet.</p>
         ) : (
-          <ul className="proposal-list">
-            {proposals.map((p) => (
-              <li key={p.proposal_id} className="proposal-item">
-                <div className="proposal-title">{p.title}</div>
-                {p.description && (
-                  <div className="proposal-desc">{p.description}</div>
-                )}
-                <div className="proposal-meta">
-                  {p.supervisor_name && <span>Supervisor: <strong>{p.supervisor_name}</strong></span>}
-                  {p.submitted_at && (
-                    <span> • Submitted: {new Date(p.submitted_at).toLocaleString()}</span>
-                  )}
-                </div>
+          <div className="spm-list">
+            {proposals.map((p, i) => (
+              <div className="spm-card" key={p.proposal_id ?? `p-${i}`}>
+                <h4>{i + 1}. {p.title}</h4>
+                {p.description && <p>{p.description}</p>}
+                <p className="spm-meta">
+                  {p.supervisor_name ? <>Supervisor: {p.supervisor_name}</> : <>Supervisor: —</>}
+                  {p.submitted_at && <> • Submitted: {new Date(p.submitted_at).toLocaleString()}</>}
+                  {p.status && <> • Status: <strong>{p.status}</strong></>}
+                </p>
                 {p.file_path && (
                   <a
-                    className="proposal-download"
+                    className="spm-attachment"
                     href={`${API}/uploads/${encodeURIComponent(p.file_path)}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                   >
-                    Download file
+                    📎 View Attachment
                   </a>
                 )}
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
-
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={onClose}>Close</button>
-        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

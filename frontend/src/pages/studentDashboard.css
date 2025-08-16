@@ -16,7 +16,6 @@
 
   display: flex;
   font-family: 'Segoe UI', sans-serif;
-  /* subtle gradient instead of flat color */
   background: linear-gradient(135deg, #7b3db8 0%, #9b58e6 45%, #7a44c2 100%);
   min-height: 100vh;
 }
@@ -36,7 +35,6 @@
 }
 
 .sidebar-logo { width: 140px; margin-bottom: 40px; }
-
 .sidebar ul { list-style: none; padding: 0; width: 100%; }
 
 .sidebar li {
@@ -52,7 +50,7 @@
 
 /* Main Area */
 .dashboard-main {
-  margin-left: 260px; /* slight extra space from sidebar */
+  margin-left: 260px;
   padding: 40px 60px;
   flex: 1;
   background-color: var(--bg);
@@ -115,13 +113,17 @@
 .dashboard-actions button:hover { filter: brightness(.96); }
 .dashboard-actions button:active { transform: translateY(1px); }
 
-/* ============ Modal ============ */
+/* ============ Modal (anchored near top) ============ */
 .modal-overlay {
   position: fixed; inset: 0;
   background: rgba(15, 10, 30, 0.45);
-  display: flex; justify-content: center; align-items: center;
-  z-index: 999;
+  display: flex;
+  justify-content: center;   /* center horizontally */
+  align-items: flex-start;   /* ⬅ anchor to top */
+  padding-top: 72px;         /* space below header */
+  z-index: 10000;
   backdrop-filter: blur(2px);
+  overflow-y: auto;          /* allow overlay to scroll on small screens */
 }
 
 .modal-content.styled-card-modal {
@@ -129,10 +131,12 @@
   border-radius: 16px;
   padding: 2rem;
   width: 560px; max-width: 92%;
-  max-height: 80vh; overflow-y: auto;
+  max-height: calc(100vh - 72px - 24px); /* header gap + small bottom gap */
+  overflow-y: auto;
   position: relative;
   box-shadow: 0 18px 38px rgba(0,0,0,.22);
   animation: fadeIn .26s ease-out;
+  margin-bottom: 24px;       /* breathing room at bottom when scrolling */
 }
 
 .modal-close {
@@ -159,7 +163,6 @@
 .project-card h4 { margin: 0 0 .35rem; color: var(--ink-900); }
 
 .project-description { font-size: .95rem; margin: .45rem 0; color: #444; }
-
 .supervisor-name { font-size: .85rem; color: #666; font-style: italic; margin-top: .2rem; }
 
 /* Attachment link inside proposal cards */
@@ -187,6 +190,9 @@
   font-weight: 600;
 }
 
+/* Optional: prevent page scroll while a modal is open */
+body.modal-open { overflow: hidden; }
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px) scale(.98); }
@@ -202,7 +208,13 @@
 /* Responsive */
 @media (max-width: 768px) {
   .dashboard-main { margin-left: 0; padding: 20px; }
-  .sidebar { display: none; } /* or toggle via JS */
+  .sidebar { display: none; }
   .dashboard-cards { flex-direction: column; }
   .dashboard-actions button { width: 100%; margin-bottom: 12px; }
+
+  .modal-overlay { padding-top: 56px; }
+  .modal-content.styled-card-modal {
+    width: 92%;
+    max-height: calc(100vh - 56px - 16px);
+  }
 }
