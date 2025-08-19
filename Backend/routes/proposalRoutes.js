@@ -4,6 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+
 const verifyToken = require('../middleware/authMiddleware');
 const proposalController = require('../controllers/proposalController');
 
@@ -27,9 +28,9 @@ const allowedMimes = [
 ];
 
 const fileFilter = (_req, file, cb) => {
-  if (!file) return cb(null, true);
+  if (!file) return cb(null, true); // allow no file
   if (allowedMimes.includes(file.mimetype)) return cb(null, true);
-  cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'file'));
+  return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'file'));
 };
 
 const upload = multer({
@@ -38,14 +39,48 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-// --- Routes ---
-// Create proposal (student_id taken from JWT in controller)
-router.post('/', verifyToken, upload.single('file'), proposalController.submitProposal);
+// --- Multer error -> 400 ---
+function multerErrorHandler(err, _req, res, next) {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'File too large (max 10MB).' });
+    }
+    return res.status(400).json({ message: 'Invalid file upload.' });
+  }
+  return next(err);
+}
 
-// Get my proposals (no param needed)
-router.get('/', verifyToken, proposalController.getProposalsByStudent); // controller uses req.user
+// --- helper: ensure numeric param ---
+function ensureNumericParam(paramName) {
+  return (req, res, next) => {
+    const v = req.params[paramName];
+    if (!/^\d+$/.test(String(v || ''))) return res.status(404).end();
+    next();
+  };
+}
 
-// Get proposals for a specific student (only admin should use; controller enforces)
-router.get('/:studentId', verifyToken, proposalController.getProposalsByStudent);
+/* ======================
+   Routes (ORDER MATTERS)
+   ====================== */
+
+// For the student proposal form dropdown
+// -> /proposals/supervisors/accepting-ideas
+router.get('/supervisors/accepting-ideas', proposalController.listAcceptingSupervisors);
+
+// Create a proposal (student-auth). multipart/form-data with "file"
+router.post(
+  '/',
+  verifyToken,
+  upload.single('file'),
+  multerErrorHandler,
+  proposalController.submitProposal
+);
+
+// Get my proposals (student-auth, controller uses req.user)
+router.get('/', verifyToken, proposalController.getProposalsByStudent);
+
+// (Optional/admin) Get proposals for a specific student (numeric only)
+// Keep this LAST so it won't swallow the routes above.
+router.get('/:studentId', ensureNumericParam('studentId'), verifyToken, proposalController.getProposalsByStudent);
 
 module.exports = router;
