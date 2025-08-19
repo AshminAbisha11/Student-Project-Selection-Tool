@@ -62,29 +62,67 @@ exports.decideProposal = async (req, res) => {
     if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
     if (!proposalId) return res.status(400).json({ message: 'proposalId required' });
 
+    const normalized = String(status || '').toLowerCase();
     const allowed = new Set(['accepted', 'rejected', 'under_review', 'submitted']);
-    if (!allowed.has((status || '').toLowerCase()))
-      return res.status(400).json({ message: 'Invalid status' });
+    if (!allowed.has(normalized)) return res.status(400).json({ message: 'Invalid status' });
 
-    // ensure the proposal belongs to this supervisor
-    const [rows] = await db.query(
-      `SELECT proposal_id FROM proposals WHERE proposal_id=? AND supervisor_id=?`,
+    // Load proposal (need cycle_id, project_id, student_id)
+    const [[p]] = await db.query(
+      `SELECT proposal_id, student_id, supervisor_id, project_id, cycle_id
+         FROM proposals
+        WHERE proposal_id=? AND supervisor_id=?`,
       [proposalId, supervisorId]
     );
-    if (rows.length === 0) return res.status(404).json({ message: 'Not found' });
+    if (!p) return res.status(404).json({ message: 'Not found' });
 
-    // optional note column (add once if you don’t have it yet)
-    // ALTER TABLE proposals ADD COLUMN decision_note TEXT NULL AFTER status;
+    // If accepting a student idea (project_id is NULL), ensure pool has a seat and insert allocation
+    if (normalized === 'accepted' && p.project_id == null) {
+      // compute seats left from pool
+      const [[pool]] = await db.query(
+        `
+        SELECT pool.project_id, pool.quota,
+               (pool.quota - COALESCE(taken.cnt,0)) AS seats_left
+          FROM projects AS pool
+          LEFT JOIN (
+            SELECT a.supervisor_id, a.cycle_id, COUNT(*) AS cnt
+            FROM allocations a
+            JOIN proposals pr ON pr.proposal_id = a.proposal_id
+            WHERE a.status='allocated' AND pr.project_id IS NULL
+            GROUP BY a.supervisor_id, a.cycle_id
+          ) AS taken
+            ON taken.supervisor_id = pool.supervisor_id
+           AND taken.cycle_id      = pool.cycle_id
+         WHERE pool.is_student_pool = 1
+           AND pool.cycle_id       = ?
+           AND pool.supervisor_id  = ?
+           AND (pool.status IS NULL OR LOWER(pool.status) IN ('open','approved','active'))
+         LIMIT 1
+        `,
+        [p.cycle_id, supervisorId]
+      );
+      if (!pool || (pool.seats_left ?? 0) <= 0) {
+        return res.status(409).json({ message: 'No seats available in student-idea pool.' });
+      }
 
+      // insert allocation if not already there
+      await db.query(
+        `INSERT IGNORE INTO allocations
+           (cycle_id, project_id, student_id, supervisor_id, proposal_id, status, allocated_at)
+         VALUES (?, NULL, ?, ?, ?, 'allocated', NOW())`,
+        [p.cycle_id, p.student_id, supervisorId, p.proposal_id]
+      );
+    }
+
+    // update proposal status + note
     await db.query(
-      `UPDATE proposals 
-         SET status = ?, decision_note = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE proposal_id = ? AND supervisor_id = ?`,
-      [status.toLowerCase(), reason || null, proposalId, supervisorId]
+      `UPDATE proposals
+          SET status = ?, decision_note = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE proposal_id = ? AND supervisor_id = ?`,
+      [normalized, reason || null, proposalId, supervisorId]
     );
 
     const [[updated]] = await db.query(
-      `SELECT proposal_id, status, decision_note AS reason, updated_at 
+      `SELECT proposal_id, status, decision_note AS reason, updated_at
          FROM proposals WHERE proposal_id=?`,
       [proposalId]
     );

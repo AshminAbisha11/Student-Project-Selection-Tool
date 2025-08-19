@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import HeaderBar from '../components/headerBar';
 import SideBar from '../components/sideBar';
 import './supervisorCreateProjectPage.css';
 
 const API = 'http://localhost:5000';
+const STUDENT_IDEA_TOPIC = 'Student Proposal Ideas';
 
 const initialForm = {
   title: '',
@@ -26,6 +27,13 @@ export default function SupervisorCreateProjectPage() {
     setError('');
     setForm((f) => ({ ...f, [name]: value }));
   };
+
+  // If they pick "Student Proposal Ideas" and the title is blank, auto-suggest a sensible title
+  useEffect(() => {
+    if (form.topic === STUDENT_IDEA_TOPIC && !form.title.trim()) {
+      setForm((f) => ({ ...f, title: 'Student Proposed Ideas' }));
+    }
+  }, [form.topic]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const validate = () => {
     if (!form.title.trim()) return 'Title is required.';
@@ -55,7 +63,7 @@ export default function SupervisorCreateProjectPage() {
         },
         body: JSON.stringify({
           title: form.title.trim(),
-          topic: form.topic.trim(),
+          topic: form.topic.trim(), // backend uses this to toggle is_student_pool/cycle_id
           description: form.description.trim(),
           full_description: form.full_description.trim(),
           prerequisites: form.prerequisites.trim(),
@@ -65,19 +73,26 @@ export default function SupervisorCreateProjectPage() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // Friendly message when there is no active allocation cycle
+        if (res.status === 409) {
+          throw new Error(
+            data.message ||
+              'No active allocation cycle. Ask the admin to open a cycle before enabling Student Proposal Ideas.'
+          );
+        }
         throw new Error(data.message || 'Failed to create project');
       }
 
-      // success UX
       alert('Project created successfully!');
-      // go to supervisor dashboard (or a "My Projects" page if you have one)
-      navigate('/supervisor-dashboard');
+      navigate('/supervisor-dashboard'); // or /supervisor/my-projects
     } catch (err) {
       setError(err.message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  const isStudentIdea = form.topic === STUDENT_IDEA_TOPIC;
 
   return (
     <div className="createproj-layout">
@@ -95,7 +110,9 @@ export default function SupervisorCreateProjectPage() {
           <form className="cp-form" onSubmit={onSubmit} noValidate>
             <div className="cp-row">
               <div className="cp-field">
-                <label>Title <span>*</span></label>
+                <label>
+                  Title <span>*</span>
+                </label>
                 <input
                   name="title"
                   value={form.title}
@@ -106,7 +123,9 @@ export default function SupervisorCreateProjectPage() {
               </div>
 
               <div className="cp-field">
-                <label>Topic <span>*</span></label>
+                <label>
+                  Topic <span>*</span>
+                </label>
                 <select
                   name="topic"
                   value={form.topic}
@@ -114,6 +133,7 @@ export default function SupervisorCreateProjectPage() {
                   disabled={submitting}
                 >
                   <option value="">Select topic</option>
+                  <option>{STUDENT_IDEA_TOPIC}</option>
                   <option>Artificial Intelligence</option>
                   <option>Data Science</option>
                   <option>Cybersecurity</option>
@@ -124,8 +144,29 @@ export default function SupervisorCreateProjectPage() {
               </div>
             </div>
 
+            {/* Guidance panel when Student Proposal Ideas is selected */}
+            {isStudentIdea && (
+              <div
+                className="cp-note"
+                style={{
+                  background: '#f5f7ff',
+                  border: '1px solid #dfe4ff',
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  marginTop: 8,
+                  color: '#2a2d55',
+                }}
+              >
+                <strong>Student Proposal Ideas</strong> is an opt-in pool. Your{' '}
+                <em>Quota</em> below is the number of student ideas you’re willing to take
+                this cycle. An active allocation cycle is required.
+              </div>
+            )}
+
             <div className="cp-field">
-              <label>Short Description <span>*</span></label>
+              <label>
+                Short Description <span>*</span>
+              </label>
               <textarea
                 name="description"
                 value={form.description}
@@ -137,7 +178,9 @@ export default function SupervisorCreateProjectPage() {
             </div>
 
             <div className="cp-field">
-              <label>Full Description <span>*</span></label>
+              <label>
+                Full Description <span>*</span>
+              </label>
               <textarea
                 name="full_description"
                 value={form.full_description}
@@ -162,7 +205,9 @@ export default function SupervisorCreateProjectPage() {
               </div>
 
               <div className="cp-field">
-                <label>Quota <span>*</span></label>
+                <label>
+                  Quota <span>*</span>
+                </label>
                 <input
                   type="number"
                   min="1"

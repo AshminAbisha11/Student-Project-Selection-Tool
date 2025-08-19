@@ -10,12 +10,18 @@ import './browseProjectsPage.css';
 const API = 'http://localhost:5000';
 const PREF_CAP = 5;
 
-const BrowseProjectsPage = () => {
+// Identify the “student ideas” pool cards
+const isIdeaPoolProject = (p) =>
+  p?.is_student_pool === 1 ||
+  p?.is_student_proposal === 1 ||
+  (typeof p?.topic === 'string' &&
+    p.topic.trim().toLowerCase() === 'student proposal ideas');
+
+export default function BrowseProjectsPage() {
   const [filters, setFilters] = useState({ supervisor: '', topic: '', keyword: '' });
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
-
   const [searchMsg, setSearchMsg] = useState('');
   const [suggestions, setSuggestions] = useState([]);
 
@@ -26,27 +32,22 @@ const BrowseProjectsPage = () => {
 
   const navigate = useNavigate();
 
-  // Prime added preferences from server
+  // Prime existing preferences for this student
   const primeAddedPrefs = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
-
       const res = await fetch(`${API}/preferences`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
-
-      const data = await res.json(); // expect [{ preference_id, project_id, ... }]
+      const data = await res.json();
       const idsSet = new Set((data || []).map(p => p.project_id));
       const idMap  = new Map((data || []).map(p => [p.project_id, p.preference_id]));
-
       setAddedPrefs(idsSet);
       setPrefIdByProject(idMap);
       setPrefCount(idsSet.size);
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, []);
 
   // Load all projects
@@ -56,7 +57,6 @@ const BrowseProjectsPage = () => {
       const res = await fetch(`${API}/projects`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load projects');
-
       setProjects(Array.isArray(data) ? data : []);
       setSearchMsg('');
       setSuggestions([]);
@@ -76,7 +76,6 @@ const BrowseProjectsPage = () => {
       const res = await fetch(`${API}/projects/filters?${query}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered projects');
-
       setProjects(data.projects || []);
       setSearchMsg('');
       setSuggestions([]);
@@ -96,7 +95,6 @@ const BrowseProjectsPage = () => {
       const qs = new URLSearchParams({ query: term }).toString();
       const res = await fetch(`${API}/projects/search?${qs}`);
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error || data.message || 'Search failed');
 
       if (Array.isArray(data.projects)) {
@@ -131,7 +129,7 @@ const BrowseProjectsPage = () => {
     }
   };
 
-  // Add preference (optimistic)
+  // Add preference (normal projects)
   const handleAddPreference = async (projectId) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -144,43 +142,34 @@ const BrowseProjectsPage = () => {
       return;
     }
 
-    // optimistic UI
+    // optimistic update
     setAddedPrefs(prev => new Set(prev).add(projectId));
     setPrefCount(c => c + 1);
 
     try {
       const res = await fetch(`${API}/preferences`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ project_id: projectId }),
       });
-
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Failed to add preference');
 
-      const newPrefId = data.preference_id;
       setPrefIdByProject(prev => {
         const next = new Map(prev);
-        next.set(projectId, newPrefId);
+        next.set(projectId, data.preference_id);
         return next;
       });
     } catch (err) {
       // revert
-      setAddedPrefs(prev => {
-        const next = new Set(prev);
-        next.delete(projectId);
-        return next;
-      });
+      setAddedPrefs(prev => { const n = new Set(prev); n.delete(projectId); return n; });
       setPrefCount(c => Math.max(0, c - 1));
       console.error('Error adding preference:', err);
       alert(err.message);
     }
   };
 
-  // Remove preference (optimistic)
+  // Remove preference (normal projects)
   const handleRemovePreference = async (projectId) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -190,17 +179,9 @@ const BrowseProjectsPage = () => {
     const prefId = prefIdByProject.get(projectId);
     if (!prefId) return;
 
-    // optimistic UI
-    setAddedPrefs(prev => {
-      const next = new Set(prev);
-      next.delete(projectId);
-      return next;
-    });
-    setPrefIdByProject(prev => {
-      const next = new Map(prev);
-      next.delete(projectId);
-      return next;
-    });
+    // optimistic
+    setAddedPrefs(prev => { const n = new Set(prev); n.delete(projectId); return n; });
+    setPrefIdByProject(prev => { const n = new Map(prev); n.delete(projectId); return n; });
     setPrefCount(c => Math.max(0, c - 1));
 
     try {
@@ -208,18 +189,21 @@ const BrowseProjectsPage = () => {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || 'Failed to remove preference');
       }
     } catch (err) {
-      // revert and re-prime
-      setAddedPrefs(prev => new Set(prev).add(projectId));
+      // re-prime if failure
       await primeAddedPrefs();
       console.error('Remove preference error:', err);
       alert(err.message);
     }
+  };
+
+  // Submit proposal for idea pool
+  const handleSubmitIdea = (project) => {
+    navigate(`/submit-proposal?sup=${project.supervisor_id}`);
   };
 
   useEffect(() => {
@@ -227,7 +211,6 @@ const BrowseProjectsPage = () => {
     primeAddedPrefs();
   }, [fetchAllProjects, primeAddedPrefs]);
 
-  // Filters
   const handleChange = (e) =>
     setFilters(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
@@ -257,17 +240,10 @@ const BrowseProjectsPage = () => {
         <div className="projects-area">
           <div className="projects-header">
             <h2>Project Listings</h2>
-
             <div className="pref-actions">
-              <span className="pref-badge">
-                Preferences: {prefCount}/{PREF_CAP}
-              </span>
-
+              <span className="pref-badge">Preferences: {prefCount}/{PREF_CAP}</span>
               {prefCount > 0 && (
-                <button
-                  className="pref-link-btn"
-                  onClick={() => navigate('/my-preferences')}
-                >
+                <button className="pref-link-btn" onClick={() => navigate('/my-preferences')}>
                   View My Preferences
                 </button>
               )}
@@ -281,11 +257,7 @@ const BrowseProjectsPage = () => {
                 <span>
                   {' '}Try:{' '}
                   {suggestions.map((s, i) => (
-                    <button
-                      key={i}
-                      className="suggestion-chip"
-                      onClick={() => handleGlobalSearch(s)}
-                    >
+                    <button key={i} className="suggestion-chip" onClick={() => handleGlobalSearch(s)}>
                       {s}
                     </button>
                   ))}
@@ -299,17 +271,32 @@ const BrowseProjectsPage = () => {
           ) : (
             <div className="project-grid">
               {projects.length > 0 ? (
-                projects.map(project => (
-                  <ProjectCard
-                    key={project.project_id}
-                    project={project}
-                    isAdded={addedPrefs.has(project.project_id)}
-                    onViewDetails={() => handleViewDetails(project.project_id)}
-                    onAddPreference={() => handleAddPreference(project.project_id)}
-                    onRemovePreference={() => handleRemovePreference(project.project_id)}
-                    disableAdd={prefCount >= PREF_CAP && !addedPrefs.has(project.project_id)}
-                  />
-                ))
+                projects.map((project) => {
+                  const ideaPool = isIdeaPoolProject(project);
+                  return (
+                    <ProjectCard
+                      key={project.project_id}
+                      project={project}
+                      isAdded={addedPrefs.has(project.project_id)}
+                      isIdeaPool={ideaPool} // some card versions use this to change the label
+                      onViewDetails={() => handleViewDetails(project.project_id)}
+                      // For idea pool cards we pass a dedicated submit handler:
+                      onSubmitIdea={ideaPool ? () => handleSubmitIdea(project) : undefined}
+                      // For older card versions that reuse onAddPreference as primary handler:
+                      onAddPreference={
+                        ideaPool
+                          ? () => handleSubmitIdea(project)
+                          : () => handleAddPreference(project.project_id)
+                      }
+                      onRemovePreference={() => handleRemovePreference(project.project_id)}
+                      disableAdd={
+                        !ideaPool &&
+                        prefCount >= PREF_CAP &&
+                        !addedPrefs.has(project.project_id)
+                      }
+                    />
+                  );
+                })
               ) : (
                 !searchMsg && <p>No projects found.</p>
               )}
@@ -326,6 +313,4 @@ const BrowseProjectsPage = () => {
       )}
     </>
   );
-};
-
-export default BrowseProjectsPage;
+}

@@ -1,3 +1,4 @@
+// src/pages/SubmitProposalPage.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -13,6 +14,7 @@ export default function SubmitProposalPage() {
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
 
+  // supervisors accepting ideas
   const [supervisors, setSupervisors] = useState([]);
   const [loadingSup, setLoadingSup] = useState(true);
   const [supError, setSupError] = useState('');
@@ -33,19 +35,16 @@ export default function SubmitProposalPage() {
     [token]
   );
 
-  // Load supervisors from /supervisor-list
+  // Load supervisors who are accepting student ideas (with seats left)
   useEffect(() => {
     let mounted = true;
     (async () => {
       setSupError('');
       setLoadingSup(true);
       try {
-        const { data } = await axios.get(`${API}/supervisor-list`, {
-          headers: authHeaders,
-        });
+        const { data } = await axios.get(`${API}/proposals/supervisors/accepting-ideas`);
         if (mounted) setSupervisors(Array.isArray(data) ? data : []);
       } catch (err) {
-        console.error('Error fetching supervisors:', err);
         if (mounted) {
           setSupError('Could not load supervisors.');
           setSupervisors([]);
@@ -55,7 +54,7 @@ export default function SubmitProposalPage() {
       }
     })();
     return () => { mounted = false; };
-  }, [authHeaders]);
+  }, []);
 
   // Modal: close on ESC
   useEffect(() => {
@@ -78,20 +77,23 @@ export default function SubmitProposalPage() {
       return;
     }
 
+    // ensure selected supervisor is in the accepting list
+    const sup = supervisors.find(s => String(s.supervisor_id) === String(supervisorId));
+    if (!sup) {
+      alert('Selected supervisor is not accepting student proposals right now.');
+      return;
+    }
+
     const fd = new FormData();
     fd.append('title', title.trim());
     fd.append('description', description.trim());
-    fd.append('supervisor_id', supervisorId); // student_id comes from JWT on the server
+    fd.append('supervisor_id', supervisorId);   // student_id comes from JWT on the server
     if (file) fd.append('file', file);
 
     try {
       setSubmitting(true);
       await axios.post(`${API}/proposals`, fd, { headers: authHeaders });
 
-      // find supervisor for display
-      const sup = supervisors.find(
-        (s) => String(s.supervisor_id) === String(supervisorId)
-      );
       setSubmittedTo(sup || null);
       setSuccessOpen(true);
 
@@ -102,7 +104,6 @@ export default function SubmitProposalPage() {
       setFile(null);
       setFileKey((k) => k + 1);
     } catch (err) {
-      console.error('Submission error:', err);
       const msg = err?.response?.data?.message || 'Failed to submit proposal.';
       alert(msg);
     } finally {
@@ -120,6 +121,9 @@ export default function SubmitProposalPage() {
 
           <div className="page-inner">
             <h2>Submit Your Proposal</h2>
+            <p className="muted">
+              Only supervisors currently accepting student ideas are shown below. Seats update as offers are accepted.
+            </p>
 
             <form onSubmit={handleSubmit} className="proposal-form">
               <label htmlFor="title">Project Title</label>
@@ -151,7 +155,7 @@ export default function SubmitProposalPage() {
                 <option value="">-- Select Supervisor --</option>
                 {supervisors.map((s) => (
                   <option key={s.supervisor_id} value={s.supervisor_id}>
-                    {s.name} {s.email ? `(${s.email})` : ''}
+                    {s.name} {s.email ? `(${s.email})` : ''} — {s.seats_left} seats left
                   </option>
                 ))}
               </select>
@@ -160,7 +164,9 @@ export default function SubmitProposalPage() {
                 <small style={{ color: '#b00' }}>{supError}</small>
               )}
               {!loadingSup && !supError && supervisors.length === 0 && (
-                <small style={{ color: '#b00' }}>No supervisors available.</small>
+                <small style={{ color: '#b00' }}>
+                  No supervisors are currently accepting student proposals.
+                </small>
               )}
 
               <label htmlFor="file">Upload File (optional)</label>
@@ -172,7 +178,14 @@ export default function SubmitProposalPage() {
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
 
-              <button type="submit" disabled={submitting}>
+              <button
+                type="submit"
+                disabled={
+                  submitting ||
+                  loadingSup ||
+                  supervisors.length === 0
+                }
+              >
                 {submitting ? 'Submitting…' : 'Submit Proposal'}
               </button>
             </form>
