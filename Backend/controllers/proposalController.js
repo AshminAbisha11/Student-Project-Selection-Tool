@@ -87,7 +87,6 @@ exports.listAcceptingSupervisors = async (_req, res) => {
  *  - title          (required)
  *  - description    (required)
  *  - supervisor_id  (required)
- *  - topic_id       (required)
  *  - file           (optional)
  *
  * Only allows supervisors who opted-in to accept student ideas this cycle.
@@ -95,26 +94,12 @@ exports.listAcceptingSupervisors = async (_req, res) => {
  */
 exports.submitProposal = async (req, res) => {
   const studentId = req.user?.user_id; // from verifyToken middleware
-  const { supervisor_id, title, description, topic_id } = req.body || {};
+  const { supervisor_id, title, description } = req.body || {};
   const file = req.file || null;
 
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
   if (!title || !description || !supervisor_id) {
     return res.status(400).json({ message: 'Title, description, and supervisor are required.' });
-  }
-
-  // --- Topic validation (REQUIRED) ---
-  const topicId = Number(topic_id);
-  if (!Number.isInteger(topicId)) {
-    return res.status(400).json({ message: 'Topic is required.' });
-  }
-  // Validate topic exists (and active, if you use that flag)
-  const [topicRows] = await db.query(
-    'SELECT topic_id FROM topics WHERE topic_id = ? AND is_active = 1 LIMIT 1',
-    [topicId]
-  );
-  if (!topicRows.length) {
-    return res.status(400).json({ message: 'Invalid topic.' });
   }
 
   let absToRemove = null;
@@ -149,22 +134,28 @@ exports.submitProposal = async (req, res) => {
     // 2) Ensure this supervisor is accepting student ideas AND has seats left
     const [poolRows] = await db.query(
       `
-      SELECT pool.project_id, pool.quota, pool.status,
-             (pool.quota - COALESCE(taken.cnt,0)) AS seats_left
+      SELECT 
+        pool.project_id,
+        pool.quota,
+        GREATEST(pool.quota - COALESCE(taken.cnt, 0), 0) AS seats_left
       FROM projects AS pool
       LEFT JOIN (
+        -- Count allocations from *student ideas* in this cycle
         SELECT a.supervisor_id, a.cycle_id, COUNT(*) AS cnt
         FROM allocations a
         JOIN proposals pr ON pr.proposal_id = a.proposal_id
-        WHERE a.status='allocated' AND pr.project_id IS NULL
+        WHERE a.status = 'allocated'
+          AND pr.project_id IS NULL
         GROUP BY a.supervisor_id, a.cycle_id
       ) AS taken
         ON taken.supervisor_id = pool.supervisor_id
        AND taken.cycle_id      = pool.cycle_id
-      WHERE pool.is_student_pool = 1
-        AND pool.cycle_id       = ?
+      WHERE
+            pool.cycle_id        = ?
         AND pool.supervisor_id  = ?
-        AND pool.status         = 'open'
+        AND pool.is_archived    = 0
+        AND pool.approval_status = 'approved'
+        AND (pool.is_student_pool = 1 OR pool.topic = 'Student Proposal Ideas')
       LIMIT 1
       `,
       [cycleId, supId]
@@ -183,13 +174,13 @@ exports.submitProposal = async (req, res) => {
       });
     }
 
-    // 3) Insert proposal (include cycle_id AND topic_id)
+    // 3) Insert proposal (topic_id is now NULL)
     const storedFilename = file ? file.filename : null;
     const [result] = await db.query(
       `INSERT INTO proposals
          (student_id, supervisor_id, cycle_id, topic_id, title, description, submitted_at, file_path)
        VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
-      [studentId, supId, cycleId, topicId, title, description, storedFilename]
+      [studentId, supId, cycleId, null, title, description, storedFilename]
     );
 
     return res.status(201).json({

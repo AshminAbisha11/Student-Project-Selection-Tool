@@ -34,18 +34,41 @@ Thanks,
       alert('Please provide a brief reason (min 5 characters) for rejection.');
       return;
     }
+
     try {
       setSubmitting(true);
+
+      // If this is a STUDENT-IDEA proposal (no project_id), use the new endpoint
+      if (status === 'accepted' && (proposal.project_id == null)) {
+        const res = await fetch(`${API}/allocations/accept-student-idea`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ proposal_id: proposal.proposal_id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || 'Accept failed');
+
+        // reflect in UI
+        onUpdated?.(proposal.proposal_id, { ...proposal, status: 'allocated' });
+        onClose?.();
+        return;
+      }
+
+      // Otherwise: existing decision route for project-linked proposals
       const res = await fetch(`${API}/supervisor-list/proposals/${proposal.proposal_id}/decision`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status, reason })
+        body: JSON.stringify({ status, reason }),
       });
-      if (!res.ok) throw new Error(await res.text());
-      const updated = await res.json();
+      const updated = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(updated.message || 'Failed to update');
+
       onUpdated?.(proposal.proposal_id, updated);
       onClose?.();
     } catch (e) {
@@ -54,6 +77,8 @@ Thanks,
       setSubmitting(false);
     }
   }
+
+  const isAllocated = proposal.status === 'allocated';
 
   return (
     <div className="spm-backdrop" onClick={onClose}>
@@ -79,7 +104,11 @@ Thanks,
         )}
 
         {proposal.file_path && (
-          <a className="spm-btn spm-btn--ghost" href={`${API}/uploads/${encodeURIComponent(proposal.file_path)}`} target="_blank" rel="noreferrer">
+          <a
+            className="spm-btn spm-btn--ghost"
+            href={`${API}/uploads/${encodeURIComponent(proposal.file_path)}`}
+            target="_blank" rel="noreferrer"
+          >
             View Attachment
           </a>
         )}
@@ -89,8 +118,20 @@ Thanks,
         <div className="spm-actions">
           <a className="spm-btn spm-btn--ghost" href={mailtoHref}>Contact via Email</a>
           <div className="spm-spacer" />
-          <button className="spm-btn spm-btn--ok" disabled={submitting} onClick={() => submitDecision('accepted')}>Accept</button>
-          <button className="spm-btn spm-btn--warn" disabled={submitting} onClick={() => submitDecision('rejected')}>Reject</button>
+          <button
+            className="spm-btn spm-btn--ok"
+            disabled={submitting || isAllocated}
+            onClick={() => submitDecision('accepted')}
+          >
+            {isAllocated ? 'Allocated' : 'Accept'}
+          </button>
+          <button
+            className="spm-btn spm-btn--warn"
+            disabled={submitting || isAllocated}
+            onClick={() => submitDecision('rejected')}
+          >
+            Reject
+          </button>
         </div>
 
         <div className="spm-reason">

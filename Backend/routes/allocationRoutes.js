@@ -3,13 +3,16 @@ const express = require('express');
 const router = express.Router();
 
 const verifyToken   = require('../middleware/authMiddleware');
-const requireAdmin  = require('../middleware/requireAdmin');   // ⬅️ NEW
-const afterDeadline = require('../middleware/afterDeadline');  // ⬅️ NEW
+const requireAdmin  = require('../middleware/requireAdmin');
+const afterDeadline = require('../middleware/afterDeadline');
 
 const allocation = require('../controllers/allocationController');
 
 // Protect everything under /allocations
 router.use(verifyToken);
+
+// NEW: supervisor accepts a student-idea proposal (allocates into their idea pool)
+router.post('/accept-student-idea', allocation.acceptStudentIdea);
 
 // Preview (no DB writes) — allow any authenticated user (or add requireAdmin if you prefer)
 router.post('/preview', allocation.preview);

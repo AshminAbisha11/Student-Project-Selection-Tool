@@ -1,6 +1,5 @@
 // src/pages/SubmitProposalPage.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './myProposalPage.css';
 
@@ -27,7 +26,6 @@ export default function SubmitProposalPage() {
   const [successOpen, setSuccessOpen] = useState(false);
   const [submittedTo, setSubmittedTo] = useState(null); // { name, email }
   const modalRef = useRef(null);
-  const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
   const authHeaders = useMemo(
@@ -210,23 +208,13 @@ export default function SubmitProposalPage() {
               Please wait for their status/response.
             </p>
 
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => setSuccessOpen(false)}
-              >
-                Close
-              </button>
+            <div className="modal-actions" style={{ textAlign: 'center' }}>
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => {
-                  setSuccessOpen(false);
-                  navigate('/my-proposals');
-                }}
+                onClick={() => setSuccessOpen(false)}
               >
-                View My Proposals
+                Close
               </button>
             </div>
           </div>
