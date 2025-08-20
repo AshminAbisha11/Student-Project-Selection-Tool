@@ -126,6 +126,22 @@ function greedySelect(candidates, capacities) {
   return result;
 }
 
+// ----- Active cycle helper (match other controllers) -----
+async function getActiveCycleId() {
+  const [byStatus] = await db.query(
+    `SELECT cycle_id FROM allocation_cycles
+     WHERE status='open' ORDER BY submission_open_at DESC LIMIT 1`
+  );
+  if (byStatus.length) return byStatus[0].cycle_id;
+
+  const [byDate] = await db.query(
+    `SELECT cycle_id FROM allocation_cycles
+     WHERE NOW() BETWEEN submission_open_at AND submission_close_at
+     ORDER BY submission_open_at DESC LIMIT 1`
+  );
+  return byDate.length ? byDate[0].cycle_id : null;
+}
+
 // ---------------- Preview (no writes) ----------------
 exports.preview = async (req, res) => {
   try {
@@ -240,7 +256,7 @@ exports.commit = async (req, res) => {
   }
 };
 
-// ---------------- Manual allocate (your existing flow, kept) ----------------
+// ---------------- Manual allocate (existing flow, kept) ----------------
 exports.allocate = async (req, res) => {
   const supervisorId = req.user.user_id; // from verifyToken
   const { project_id, student_id } = req.body;
@@ -297,7 +313,7 @@ exports.allocate = async (req, res) => {
   }
 };
 
-// ---------------- Manual deallocate (your existing flow, kept) ----------------
+// ---------------- Manual deallocate (existing flow, kept) ----------------
 exports.deallocate = async (req, res) => {
   const supervisorId = req.user.user_id;
   const { allocation_id } = req.params;
@@ -325,6 +341,114 @@ exports.deallocate = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     return res.status(400).json({ message: err.message || 'Deallocation failed' });
+  } finally {
+    conn.release();
+  }
+};
+
+// ---------------- Accept a Student-Idea Proposal (NEW) ----------------
+// Allocates a proposal without a project_id into the supervisor's student-idea pool
+exports.acceptStudentIdea = async (req, res) => {
+  const supervisorId = req.user?.user_id;    // supervisors are authenticated
+  const { proposal_id } = req.body;
+
+  if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+  if (!proposal_id) return res.status(400).json({ message: 'proposal_id required' });
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const cycleId = await getActiveCycleId();
+    if (!cycleId) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'Submissions are closed (no active cycle).' });
+    }
+
+    // 1) Lock the proposal; ensure it's a student-idea proposal for this supervisor & cycle
+    const [propRows] = await conn.query(
+      `
+      SELECT p.proposal_id, p.student_id, p.supervisor_id, p.project_id, p.status
+      FROM proposals p
+      WHERE p.proposal_id = ? AND p.supervisor_id = ? AND p.cycle_id = ?
+      FOR UPDATE
+      `,
+      [proposal_id, supervisorId, cycleId]
+    );
+    if (!propRows.length) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Proposal not found for this cycle/supervisor.' });
+    }
+    const pr = propRows[0];
+    if (pr.project_id) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Not a student-idea proposal.' });
+    }
+    if (pr.status === 'allocated') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Already allocated.' });
+    }
+
+    // 2) Find & lock the supervisor’s student-idea pool row for this cycle
+    const [poolRows] = await conn.query(
+      `
+      SELECT 
+        pool.project_id,
+        pool.quota,
+        GREATEST(pool.quota - COALESCE(taken.cnt, 0), 0) AS seats_left
+      FROM projects AS pool
+      LEFT JOIN (
+        SELECT a.supervisor_id, a.cycle_id, COUNT(*) AS cnt
+        FROM allocations a
+        JOIN proposals pr ON pr.proposal_id = a.proposal_id
+        WHERE a.status = 'allocated'
+          AND pr.project_id IS NULL
+        GROUP BY a.supervisor_id, a.cycle_id
+      ) AS taken
+        ON taken.supervisor_id = pool.supervisor_id
+       AND taken.cycle_id      = pool.cycle_id
+      WHERE
+            pool.cycle_id         = ?
+        AND pool.supervisor_id   = ?
+        AND pool.is_archived     = 0
+        AND pool.approval_status = 'approved'
+        AND (pool.is_student_pool = 1 OR pool.topic = 'Student Proposal Ideas')
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [cycleId, supervisorId]
+    );
+
+    if (!poolRows.length) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'No student-idea pool found for this cycle.' });
+    }
+    const pool = poolRows[0];
+    const seatsLeft = Number(pool.seats_left ?? 0);
+    if (seatsLeft <= 0) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'No seats available in student-idea pool.' });
+    }
+
+    // 3) Insert allocation tied to the pool project_id
+    await conn.query(
+      `INSERT INTO allocations (proposal_id, student_id, project_id, supervisor_id, status, allocated_at, cycle_id)
+       VALUES (?, ?, ?, ?, 'allocated', NOW(), ?)`,
+      [proposal_id, pr.student_id, pool.project_id, supervisorId, cycleId]
+    );
+
+    // 4) Mark proposal as allocated
+    await conn.query(
+      `UPDATE proposals SET status='allocated' WHERE proposal_id = ?`,
+      [proposal_id]
+    );
+
+    await conn.commit();
+    return res.json({ message: 'Proposal accepted and allocated.' });
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) {}
+    console.error('acceptStudentIdea error:', err);
+    return res.status(500).json({ message: 'Internal server error' });
   } finally {
     conn.release();
   }
