@@ -17,7 +17,6 @@ const scorePair = (prefOrder, contacted, rank) => {
 };
 
 async function loadEligiblePreferences(conn) {
-  // Exclude students already allocated (one-project-per-student)
   const [already] = await conn.query(`SELECT student_id FROM allocations`);
   const alreadySet = new Set(already.map(r => r.student_id));
 
@@ -42,11 +41,9 @@ async function loadEligiblePreferences(conn) {
 }
 
 async function loadCapacities(conn) {
-  // Supervisor quotas
   const [supQuotaRows] = await conn.query(`SELECT supervisor_id, quota_total FROM supervisor_meta`);
   const supervisorQuota = new Map(supQuotaRows.map(r => [r.supervisor_id, Number(r.quota_total || 0)]));
 
-  // Current supervisor load based on allocations
   const [supLoad] = await conn.query(`
     SELECT pr.supervisor_id, COUNT(*) AS c
     FROM allocations a
@@ -72,7 +69,6 @@ function rankBySubmissionWithinProject(prefs) {
 }
 
 function sortCandidates(cands) {
-  // deterministic: score DESC, preference_order ASC, submitted_at ASC, student_id ASC
   cands.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (a.preference_order !== b.preference_order) return a.preference_order - b.preference_order;
@@ -86,10 +82,9 @@ function sortCandidates(cands) {
 function greedySelect(candidates, capacities) {
   const { supervisorQuota, supervisorAllocated } = capacities;
 
-  // project remaining is derived live from (quota - spots_filled)
-  const projectRemaining = new Map(); // pid -> remaining seats
-  const supervisorRemaining = new Map(); // sid -> remaining seats
-  const assigned = new Set(); // student_ids
+  const projectRemaining = new Map();
+  const supervisorRemaining = new Map();
+  const assigned = new Set();
 
   for (const c of candidates) {
     if (!projectRemaining.has(c.project_id)) {
@@ -126,7 +121,7 @@ function greedySelect(candidates, capacities) {
   return result;
 }
 
-// ----- Active cycle helper (match other controllers) -----
+// ----- Active cycle helper -----
 async function getActiveCycleId() {
   const [byStatus] = await db.query(
     `SELECT cycle_id FROM allocation_cycles
@@ -145,7 +140,7 @@ async function getActiveCycleId() {
 // ---------------- Preview (no writes) ----------------
 exports.preview = async (req, res) => {
   try {
-    const conn = db; // pool is fine for read-only
+    const conn = db;
     let prefs = await loadEligiblePreferences(conn);
     if (!prefs.length) {
       return res.json({ allocations: [], meta: { reason: 'no-eligible-preferences' } });
@@ -176,7 +171,6 @@ exports.preview = async (req, res) => {
 
 // ---------------- Commit (transactional writes) ----------------
 exports.commit = async (req, res) => {
-  // Either accept a vetted list from client, or recompute here if omitted.
   const { allocations: approved } = req.body || {};
   let conn;
 
@@ -186,7 +180,6 @@ exports.commit = async (req, res) => {
 
     let toCommit = approved;
     if (!Array.isArray(toCommit) || !toCommit.length) {
-      // recompute server-side to keep it deterministic
       let prefs = await loadEligiblePreferences(conn);
       prefs = rankBySubmissionWithinProject(prefs);
       const candidates = prefs.map(r => ({
@@ -200,21 +193,18 @@ exports.commit = async (req, res) => {
 
     let inserted = 0;
     for (const a of toCommit) {
-      // 1) One-project-per-student: block if already allocated
       const [s] = await conn.query(
         `SELECT 1 FROM allocations WHERE student_id = ? FOR UPDATE`,
         [a.student_id]
       );
       if (s.length) continue;
 
-      // 2) Lock project row and check capacity (spots_filled < quota)
       const [[proj]] = await conn.query(
         `SELECT project_id, quota, spots_filled FROM projects WHERE project_id = ? FOR UPDATE`,
         [a.project_id]
       );
       if (!proj || proj.spots_filled >= proj.quota) continue;
 
-      // 3) Supervisor live capacity check
       const [[sup]] = await conn.query(
         `SELECT sm.quota_total AS quota,
                 (SELECT COUNT(*) FROM allocations al
@@ -226,16 +216,14 @@ exports.commit = async (req, res) => {
       );
       if (!sup || (sup.quota - (sup.used || 0)) <= 0) continue;
 
-      // 4) Reserve project seat
       const [u] = await conn.query(
         `UPDATE projects
            SET spots_filled = spots_filled + 1
          WHERE project_id = ? AND spots_filled < quota`,
         [a.project_id]
       );
-      if (!u.affectedRows) continue; // another txn took the last seat
+      if (!u.affectedRows) continue;
 
-      // 5) Insert allocation (status optional; set to 'allocated')
       await conn.query(
         `INSERT INTO allocations (student_id, project_id, supervisor_id, score, status)
          VALUES (?, ?, ?, ?, 'allocated')`,
@@ -258,7 +246,7 @@ exports.commit = async (req, res) => {
 
 // ---------------- Manual allocate (existing flow, kept) ----------------
 exports.allocate = async (req, res) => {
-  const supervisorId = req.user.user_id; // from verifyToken
+  const supervisorId = req.user.user_id;
   const { project_id, student_id } = req.body;
 
   if (!project_id || !student_id) {
@@ -269,7 +257,6 @@ exports.allocate = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // One per student guard (manual)
     const [existsStudent] = await conn.query(
       `SELECT 1 FROM allocations WHERE student_id = ? FOR UPDATE`,
       [student_id]
@@ -346,10 +333,9 @@ exports.deallocate = async (req, res) => {
   }
 };
 
-// ---------------- Accept a Student-Idea Proposal (NEW) ----------------
-// Allocates a proposal without a project_id into the supervisor's student-idea pool
+// ---------------- Accept a Student-Idea Proposal (UPDATED) ----------------
 exports.acceptStudentIdea = async (req, res) => {
-  const supervisorId = req.user?.user_id;    // supervisors are authenticated
+  const supervisorId = req.user?.user_id;
   const { proposal_id } = req.body;
 
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
@@ -365,7 +351,7 @@ exports.acceptStudentIdea = async (req, res) => {
       return res.status(409).json({ message: 'Submissions are closed (no active cycle).' });
     }
 
-    // 1) Lock the proposal; ensure it's a student-idea proposal for this supervisor & cycle
+    // 1) Lock proposal (must be student-idea for this supervisor & cycle)
     const [propRows] = await conn.query(
       `
       SELECT p.proposal_id, p.student_id, p.supervisor_id, p.project_id, p.status
@@ -384,12 +370,12 @@ exports.acceptStudentIdea = async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ message: 'Not a student-idea proposal.' });
     }
-    if (pr.status === 'allocated') {
+    if (pr.status === 'accepted' || pr.status === 'allocated') {
       await conn.rollback();
       return res.status(400).json({ message: 'Already allocated.' });
     }
 
-    // 2) Find & lock the supervisor’s student-idea pool row for this cycle
+    // 2) Lock supervisor's student-idea pool row
     const [poolRows] = await conn.query(
       `
       SELECT 
@@ -424,32 +410,143 @@ exports.acceptStudentIdea = async (req, res) => {
       return res.status(400).json({ message: 'No student-idea pool found for this cycle.' });
     }
     const pool = poolRows[0];
-    const seatsLeft = Number(pool.seats_left ?? 0);
-    if (seatsLeft <= 0) {
+    if (Number(pool.seats_left ?? 0) <= 0) {
       await conn.rollback();
       return res.status(400).json({ message: 'No seats available in student-idea pool.' });
     }
 
-    // 3) Insert allocation tied to the pool project_id
-    await conn.query(
+    // 3) Insert allocation and bump spots_filled
+    const [ins] = await conn.query(
       `INSERT INTO allocations (proposal_id, student_id, project_id, supervisor_id, status, allocated_at, cycle_id)
        VALUES (?, ?, ?, ?, 'allocated', NOW(), ?)`,
       [proposal_id, pr.student_id, pool.project_id, supervisorId, cycleId]
     );
 
-    // 4) Mark proposal as allocated
     await conn.query(
-      `UPDATE proposals SET status='allocated' WHERE proposal_id = ?`,
+      `UPDATE projects
+         SET spots_filled = LEAST(spots_filled + 1, quota)
+       WHERE project_id = ?`,
+      [pool.project_id]
+    );
+
+    // 4) Mark proposal as accepted (fits your ENUM)
+    await conn.query(
+      `UPDATE proposals SET status='accepted' WHERE proposal_id = ?`,
       [proposal_id]
     );
 
     await conn.commit();
-    return res.json({ message: 'Proposal accepted and allocated.' });
+    return res.json({ message: 'Proposal accepted and allocated.', allocation_id: ins.insertId });
   } catch (err) {
     try { await conn.rollback(); } catch (_) {}
     console.error('acceptStudentIdea error:', err);
     return res.status(500).json({ message: 'Internal server error' });
   } finally {
     conn.release();
+  }
+};
+
+// ---------------- NEW: list & detail for Allocated Students UI ----------------
+// ---------------- NEW: list & detail for Allocated Students UI ----------------
+exports.listForSupervisor = async (req, res) => {
+  try {
+    const sid = req.user.user_id;
+    const rawCycle = req.query.cycle_id;
+    const hasCycle = rawCycle !== undefined && String(rawCycle).trim() !== '';
+    const cycleId = hasCycle ? Number(rawCycle) : null;
+
+    const sql = `
+      SELECT
+        a.allocation_id,
+        a.status              AS allocation_status,
+        a.allocated_at,
+        a.cycle_id,
+
+        a.student_id,
+        stu.name              AS student_name,
+        stu.email             AS student_email,
+
+        a.supervisor_id,
+
+        p.project_id,
+        p.title               AS project_title,
+        p.description         AS project_description,
+        p.topic               AS project_topic_text,
+        p.quota,
+        p.spots_filled,
+        p.approval_status     AS project_approval_status,
+
+        a.proposal_id,
+        pr.title              AS proposal_title,
+        pr.description        AS proposal_description,
+        pr.file_path          AS proposal_file_path,
+        pr.status             AS proposal_status
+      FROM allocations a
+      JOIN users    stu ON stu.user_id = a.student_id
+      JOIN projects p   ON p.project_id = a.project_id
+      LEFT JOIN proposals pr ON pr.proposal_id = a.proposal_id
+      WHERE a.supervisor_id = ?
+        AND a.status = 'allocated'
+      ${hasCycle ? 'AND a.cycle_id = ?' : ''}
+      ORDER BY a.allocated_at DESC, a.allocation_id DESC
+    `;
+
+    const params = hasCycle ? [sid, cycleId] : [sid];
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (e) {
+    console.error('listForSupervisor error:', e);
+    res.status(500).json({ message: 'Failed to load allocations' });
+  }
+};
+
+exports.getOne = async (req, res) => {
+  try {
+    const sid = req.user.user_id;
+    const { allocation_id } = req.params;
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        a.allocation_id,
+        a.status              AS allocation_status,
+        a.allocated_at,
+        a.cycle_id,
+
+        a.student_id,
+        stu.name              AS student_name,
+        stu.email             AS student_email,
+
+        a.supervisor_id,
+
+        p.project_id,
+        p.title               AS project_title,
+        p.description         AS project_description,
+        p.topic               AS project_topic_text,
+        p.quota,
+        p.spots_filled,
+        p.approval_status     AS project_approval_status,
+
+        a.proposal_id,
+        pr.title              AS proposal_title,
+        pr.description        AS proposal_description,
+        pr.file_path          AS proposal_file_path,
+        pr.status             AS proposal_status
+      FROM allocations a
+      JOIN users    stu ON stu.user_id = a.student_id
+      JOIN projects p   ON p.project_id = a.project_id
+      LEFT JOIN proposals pr ON pr.proposal_id = a.proposal_id
+      WHERE a.allocation_id = ?
+        AND a.supervisor_id = ?
+      LIMIT 1
+      `,
+      [allocation_id, sid]
+    );
+
+    if (!rows.length) return res.status(404).json({ message: 'Allocation not found' });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error('getOne error:', e);
+    res.status(500).json({ message: 'Failed to load allocation' });
   }
 };

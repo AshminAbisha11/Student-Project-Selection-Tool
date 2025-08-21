@@ -31,58 +31,72 @@ export default function SupervisorDashboardPage() {
     allocatedStudents: 0,
   });
 
-  const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  // Memoize token & user so they don't change identity each render
+  const token = useMemo(() => localStorage.getItem('token'), []);
+  const user = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || 'null');
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const userRole = (user?.role || '').toLowerCase();
+  const userId = user?.user_id;
   const name = useMemo(() => user?.name || getNameFromToken() || 'Supervisor', [user]);
 
-  // auth + role guard
+  // auth + role guard (runs once because deps are stable)
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
       return;
     }
-    if (String(user.role).toLowerCase() !== 'supervisor') {
+    if (userRole !== 'supervisor') {
       navigate('/student-dashboard', { replace: true });
     }
-  }, [navigate, token, user]);
+  }, [navigate, token, user, userRole]);
 
-  // load dashboard overview
+  // load dashboard overview (runs once; token/userId are stable)
   useEffect(() => {
-    let mounted = true;
-    async function load() {
+    if (!token || !userId) return;
+
+    const controller = new AbortController();
+
+    (async () => {
       try {
+        setLoading(true);
         const { data } = await axios.get(`${API}/supervisor/overview`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
         });
-        if (!mounted) return;
         setOverview({
           projects: Number(data.projects || 0),
           pendingProposals: Number(data.pendingProposals || 0),
           allocatedStudents: Number(data.allocatedStudents || 0),
         });
       } catch (err) {
-        console.warn('Overview load failed:', err?.response?.data || err.message);
-        if (err.response?.status === 401 || err.response?.status === 403) {
-          localStorage.clear();
-          navigate('/login', { replace: true });
+        if (!controller.signal.aborted) {
+          console.warn('Overview load failed:', err?.response?.data || err.message);
+          if (err.response?.status === 401 || err.response?.status === 403) {
+            localStorage.clear();
+            navigate('/login', { replace: true });
+          }
         }
       } finally {
-        if (mounted) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
-    }
-    if (token && user) load();
-    return () => { mounted = false; };
-  }, [token, user, navigate]);
+    })();
+
+    return () => controller.abort();
+  }, [token, userId, navigate]);
 
   return (
     <div
       className="dashboard-container"
       style={{ backgroundImage: "url('/assets/login_background.png')" }}
     >
-      {/* Supervisor sidebar */}
       <SupervisorNav />
 
-      {/* Main pane */}
       <div className="dashboard-main">
         <header className="dashboard-header">
           <h2>Supervisor Project Portal</h2>
@@ -97,7 +111,7 @@ export default function SupervisorDashboardPage() {
         <div className="dashboard-cards">
           <div
             className="dashboard-card"
-            onClick={() => navigate('/my-projects')}
+            onClick={() => navigate('/supervisor/my-projects')}
             style={{ cursor: 'pointer' }}
           >
             <h4>{loading ? '—' : overview.projects}</h4>
@@ -106,7 +120,7 @@ export default function SupervisorDashboardPage() {
 
           <div
             className="dashboard-card"
-            onClick={() => navigate('/supervisor-list/proposals')}
+            onClick={() => navigate('/supervisor/received-proposals')}
             style={{ cursor: 'pointer' }}
           >
             <h4>{loading ? '—' : overview.pendingProposals}</h4>
@@ -115,7 +129,7 @@ export default function SupervisorDashboardPage() {
 
           <div
             className="dashboard-card"
-            onClick={() => navigate('/supervisor/allocated')}
+            onClick={() => navigate('/supervisor/allocated-students')}
             style={{ cursor: 'pointer' }}
           >
             <h4>{loading ? '—' : overview.allocatedStudents}</h4>
@@ -126,9 +140,9 @@ export default function SupervisorDashboardPage() {
         <div className="dashboard-actions">
           <h4>Quick Actions</h4>
           <button onClick={() => navigate('/supervisor/create-project')}>Add new Project</button>
-          <button onClick={() => navigate('/supervisor-list/proposals')}>Review Proposals</button>
-          <button onClick={() => navigate('/supervisor/allocated')}>View Allocated Students</button>
-          <button onClick={() => navigate('/my-projects')}>My Projects</button>
+          <button onClick={() => navigate('/supervisor/received-proposals')}>Review Proposals</button>
+          <button onClick={() => navigate('/supervisor/allocated-students')}>View Allocated Students</button>
+          <button onClick={() => navigate('/supervisor/my-projects')}>My Projects</button>
         </div>
       </div>
     </div>

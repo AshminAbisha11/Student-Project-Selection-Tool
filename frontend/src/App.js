@@ -19,7 +19,8 @@ import MyProposalPage from './pages/myProposalPage';
 import SupervisorDashboardPage from './pages/supervisorDashboardPage';
 import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
 import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';
-import SupervisorProposalsPage from './pages/supervisorProposalPage'; 
+import SupervisorProposalsPage from './pages/supervisorProposalPage';
+import SupervisorAllocatedStudentsPage from './pages/supervisorAllocatedStudentsPage';
 
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
@@ -206,13 +207,26 @@ function App() {
             </ProtectedRoute>
           }
         />
-
-        {/* NEW: Supervisor → Received Proposals */}
+        {/* Received proposals (alias kept for back-compat) */}
         <Route
-          path="/supervisor-list/proposals"
+          path="/supervisor/received-proposals"
           element={
             <ProtectedRoute roles={['supervisor']}>
               <SupervisorProposalsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/supervisor-list/proposals"
+          element={<Navigate to="/supervisor/received-proposals" replace />}
+        />
+
+        {/* Allocated Students */}
+        <Route
+          path="/supervisor/allocated-students"
+          element={
+            <ProtectedRoute roles={['supervisor']}>
+              <SupervisorAllocatedStudentsPage />
             </ProtectedRoute>
           }
         />

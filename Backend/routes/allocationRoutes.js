@@ -8,20 +8,43 @@ const afterDeadline = require('../middleware/afterDeadline');
 
 const allocation = require('../controllers/allocationController');
 
-// Protect everything under /allocations
+// ---- helpers ----------------------------------------------------
+const ensureNumericParam = (param) => (req, res, next) => {
+  const v = req.params[param];
+  if (!/^\d+$/.test(String(v || ''))) {
+    return res.status(404).json({ message: 'Not found' });
+  }
+  next();
+};
+
+// Protect all routes
 router.use(verifyToken);
 
-// NEW: supervisor accepts a student-idea proposal (allocates into their idea pool)
+/* ===================== READ ===================== */
+
+// List allocations for the logged-in supervisor
+//   GET /allocations/supervisor?cycle_id=1
+router.get('/supervisor', allocation.listForSupervisor);
+
+// (Optional fallback: keep GET /allocations working like before)
+router.get('/', allocation.listForSupervisor);
+
+// Allocation detail (must be AFTER the specific routes above)
+router.get('/:allocation_id', ensureNumericParam('allocation_id'), allocation.getOne);
+
+/* ===================== WRITE ===================== */
+
+// Supervisor accepts a student-idea proposal into their pool
 router.post('/accept-student-idea', allocation.acceptStudentIdea);
 
-// Preview (no DB writes) — allow any authenticated user (or add requireAdmin if you prefer)
+// Preview a run (no DB writes)
 router.post('/preview', allocation.preview);
 
-// Commit (writes to DB) — must be admin AND after the deadline
+// Commit the run (DB writes; admin + after deadline)
 router.post('/commit', requireAdmin, afterDeadline, allocation.commit);
 
-// Manual admin ops (kept)
+// Manual allocate / deallocate
 router.post('/', allocation.allocate);
-router.delete('/:allocation_id', allocation.deallocate);
+router.delete('/:allocation_id', ensureNumericParam('allocation_id'), allocation.deallocate);
 
 module.exports = router;
