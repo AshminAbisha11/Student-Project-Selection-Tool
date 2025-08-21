@@ -17,15 +17,18 @@ export default function SupervisorNav() {
 
       {/* Nav */}
       <nav className="sv-nav">
-        <NavLink to="/supervisor/allocated" className="sv-link">
+        <NavLink to="/supervisor/allocated-students" className="sv-link">
           Allocated Students
         </NavLink>
+
         <NavLink to="/my-projects" className="sv-link">
           My Projects
         </NavLink>
+
         <NavLink to="/supervisor-list/proposals" className="sv-link">
           Received Proposals
         </NavLink>
+
         <NavLink to="/logout" className="sv-link sv-link--danger">
           Logout
         </NavLink>
