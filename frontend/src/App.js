@@ -1,3 +1,4 @@
+// ===== Top-level imports ONLY =====
 import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
@@ -22,28 +23,36 @@ import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';
 import SupervisorProposalsPage from './pages/supervisorProposalPage';
 import SupervisorAllocatedStudentsPage from './pages/supervisorAllocatedStudentsPage';
 
+
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
+import AdminDashboardPage from './pages/adminDashboardPage';
+
+
+// Admin Pages (NEW)
+import AdminSignupPage from './pages/adminSignupPage';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 /* ============================
  * Small auth helpers (client)
  * ==========================*/
+function parseJwt(token) {
+  try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; }
+}
 function isTokenValid(token) {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload?.exp * 1000 > Date.now();
-  } catch {
-    return false;
-  }
+  const payload = parseJwt(token);
+  return !!payload && payload.exp * 1000 > Date.now();
 }
 function getUser() {
   try {
-    return JSON.parse(localStorage.getItem('user') || 'null');
-  } catch {
-    return null;
-  }
+    const saved = JSON.parse(localStorage.getItem('user') || 'null');
+    if (saved && saved.role) return saved;
+  } catch {}
+  const token = localStorage.getItem('token');
+  const payload = token ? parseJwt(token) : null;
+  if (payload && payload.role) return { role: payload.role };
+  return null;
 }
 function logoutClient() {
   localStorage.removeItem('token');
@@ -111,6 +120,7 @@ function RootRedirect() {
   if (!ok) return <Navigate to="/login" replace />;
 
   const role = getUser()?.role?.toLowerCase();
+  if (role === 'admin') return <Navigate to="/admin" replace />;
   if (role === 'supervisor') return <Navigate to="/supervisor-dashboard" replace />;
   if (role === 'student') return <Navigate to="/student-dashboard" replace />;
 
@@ -134,8 +144,19 @@ function App() {
         <Route
           path="/change-password"
           element={
-            <ProtectedRoute roles={['student', 'supervisor']}>
+            <ProtectedRoute roles={['student', 'supervisor', 'admin']}>
               <ChangePassword />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Admin Routes */}
+        <Route path="/admin-signup" element={<AdminSignupPage />} />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <AdminDashboardPage />
             </ProtectedRoute>
           }
         />
