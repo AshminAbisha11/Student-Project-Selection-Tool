@@ -25,6 +25,9 @@ const allocationRoutes = require('./routes/allocationRoutes');
 const supervisorDashboardRoutes = require('./routes/supervisorDashboardRoutes');
 const supervisorRoutes = require('./routes/supervisorRoutes');
 const cycleRoutes = require('./routes/cycleRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const adminRegisterRoutes = require('./routes/adminRegisterRoutes');
+
 
 const app = express();
 
@@ -82,6 +85,9 @@ app.use('/allocations', allocationRoutes);
 app.use('/cycle', cycleRoutes);
 app.use('/supervisor', supervisorDashboardRoutes);
 app.use('/supervisor-list', supervisorRoutes);
+app.use('/admin', adminRoutes);
+app.use('/admin-signup', adminRegisterRoutes);
+
 
 /* ---------------------------
    Start server

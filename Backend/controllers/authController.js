@@ -6,13 +6,131 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { addTokenToBlacklist } = require('../models/blacklistModel');
 
-const JWT_SECRET = process.env.JWT_SECRET_KEY;
+const JWT_SECRET = process.env.JWT_SECRET_KEY || 'dev-secret';
+const FRONTEND_ORIGIN = process.env.CLIENT_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// ---- helpers ----
+/* ------------ helpers ------------- */
 const getBearer = (req) => {
   const h = req.headers.authorization || '';
   const m = /^Bearer\s+(.+)$/.exec(h);
   return m ? m[1].trim() : null;
+};
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const parseJson = (val) => {
+  if (!val) return null;
+  if (Array.isArray(val) || typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return null; }
+};
+
+/* =========================================
+ * POST /auth/admin-signup
+ * Body: { name, email, password, inviteCode? }
+ * - First ever admin: inviteCode not required (bootstrap).
+ * - Otherwise: inviteCode required and validated in admin_invites.
+ * =======================================*/
+exports.adminSignup = async (req, res) => {
+  try {
+    let { name, email, password, inviteCode } = req.body || {};
+    name = String(name || '').trim();
+    email = String(email || '').trim().toLowerCase();
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'name, email and password are required' });
+    }
+
+    // Optional: enforce strong password like register
+    const strongPw = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*]).{8,}$/;
+    if (!strongPw.test(password)) {
+      return res.status(400).json({
+        message: 'Password must be at least 8 characters, with upper, lower, number and special character.'
+      });
+    }
+
+    // Already registered?
+    const [[dup]] = await db.query(
+      'SELECT user_id FROM users WHERE email = ? LIMIT 1',
+      [email]
+    );
+    if (dup) return res.status(409).json({ message: 'Email already registered' });
+
+    // Is this the first ever admin?
+    const [[cnt]] = await db.query("SELECT COUNT(*) AS c FROM users WHERE role='admin'");
+    const isBootstrap = Number(cnt.c || 0) === 0;
+
+    let invite = null;
+    if (!isBootstrap) {
+      const raw = String(inviteCode || '').trim();
+      if (!raw) return res.status(400).json({ message: 'Invite code is required' });
+
+      // If user pasted multiple codes separated by comma, take the first
+      const code = raw.split(',').map(s => s.trim()).filter(Boolean)[0];
+      const codeHash = sha256(code);
+
+      const [[row]] = await db.query(
+        `SELECT * FROM admin_invites
+           WHERE code_hash = ?
+             AND role = 'admin'
+             AND (expires_at IS NULL OR expires_at > NOW())
+             AND uses < max_uses
+         LIMIT 1`,
+        [codeHash]
+      );
+      if (!row) return res.status(400).json({ message: 'Invalid or expired invite code' });
+
+      // Email & domain checks
+      const domain = String(email.split('@')[1] || '').toLowerCase();
+      if (row.email && row.email.toLowerCase() !== email.toLowerCase()) {
+        return res.status(400).json({ message: 'Invite locked to a different email' });
+      }
+      const allowed = parseJson(row.allowed_domains_json) || toArray(row.allowed_domain);
+      if (allowed.length && !allowed.map(d => String(d).toLowerCase()).includes(domain)) {
+        return res.status(400).json({ message: 'Email domain not allowed for this invite' });
+      }
+      invite = row;
+    }
+
+    // Create admin user
+    const hashed = await bcrypt.hash(password, 10);
+    const [ins] = await db.query(
+      `INSERT INTO users (name, email, password, role, active, is_email_verified, created_at)
+       VALUES (?,?,?,?,1,0,NOW())`,
+      [name, email, hashed, 'admin']
+    );
+    const userId = ins.insertId;
+
+    // Consume invite if used
+    if (invite) {
+      await db.query(
+        `UPDATE admin_invites
+           SET uses = uses + 1,
+               used_up_at = CASE WHEN uses + 1 >= max_uses THEN NOW() ELSE used_up_at END
+         WHERE invite_id = ?`,
+        [invite.invite_id]
+      );
+      await db.query(
+        `INSERT INTO admin_invite_claims (invite_id, user_id) VALUES (?,?)`,
+        [invite.invite_id, userId]
+      );
+    }
+
+    // Audit
+    await db.query(
+      `INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, meta)
+       VALUES (?,?,?,?,?)`,
+      [userId, isBootstrap ? 'ADMIN_BOOTSTRAP' : 'ADMIN_SIGNUP', 'user', String(userId),
+       JSON.stringify({ email })]
+    );
+
+    // JWT (same 1h policy as login)
+    const payload = { user_id: userId, email, name, role: 'admin' };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+
+    return res.status(201).json({ token, role: 'admin', user: payload });
+  } catch (e) {
+    console.error('adminSignup error', e);
+    return res.status(500).json({ message: 'Server error' });
+  }
 };
 
 /* =========================================
@@ -74,8 +192,7 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ message: 'Invalid email format.' });
     }
 
-    const strongPw =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*])[A-Za-z\d!@#\$%\^&\*]{8,}$/;
+    const strongPw = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*])[A-Za-z\d!@#\$%\^&\*]{8,}$/;
     if (!strongPw.test(password)) {
       return res.status(400).json({
         message: 'Password must be at least 8 characters, with upper, lower, number and special character.',
@@ -115,12 +232,14 @@ exports.forgotPassword = async (req, res) => {
     if (!user.length) return res.status(404).json({ message: 'No user with that email.' });
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 3600000);
+    const expires = new Date(Date.now() + 3600000); // 1h
 
-    await db.query('UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
-      [token, expires, email]);
+    await db.query(
+      'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
+      [token, expires, email]
+    );
 
-    const resetLink = `http://localhost:3000/reset-password/${token}`;
+    const resetLink = `${FRONTEND_ORIGIN}/reset-password/${token}`;
 
     const transporter = nodemailer.createTransport({
       service: 'gmail',
@@ -173,17 +292,13 @@ exports.resetPassword = async (req, res) => {
 /* =========================================
  * POST /auth/logout
  * Header: Authorization: Bearer <token>
- * Always attempts to store the token; never inserts NULL.
  * =======================================*/
 exports.logoutUser = async (req, res) => {
   try {
     const token = getBearer(req);
-
-    // Idempotent UX: succeed even if header missing, but never insert NULL.
     if (token && token !== 'null' && token !== 'undefined') {
-      await addTokenToBlacklist(token); // model writes to blacklisted_tokens
+      await addTokenToBlacklist(token);
     }
-
     return res.status(200).json({ message: 'Logout successful' });
   } catch (error) {
     console.error('Logout error:', error);
@@ -192,7 +307,7 @@ exports.logoutUser = async (req, res) => {
 };
 
 /* =========================================
- * POST /auth/change-password  (protected)
+ * POST /auth/change-password (protected)
  * =======================================*/
 exports.changePassword = async (req, res) => {
   const userId = req.user?.user_id;
@@ -220,8 +335,7 @@ exports.changePassword = async (req, res) => {
 };
 
 /* =========================================
- * GET /auth/me  (optional helper; protected)
- * Returns the decoded user from verifyToken middleware.
+ * GET /auth/me (protected)
  * =======================================*/
 exports.me = async (req, res) => {
   if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
