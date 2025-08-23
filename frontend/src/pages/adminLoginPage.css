@@ -1,0 +1,198 @@
+/* ===========================
+   THEME TOKENS
+=========================== */
+:root{
+  --primary: #6f35c8;
+  --primary-2: #8a54ff;
+
+  --ink:   #2e255f;
+  --ink-2: #6b5fa0;
+  --hint:  #8a82b6;
+
+  --ring:   rgba(123,44,191,.22);
+  --border: rgba(123,44,191,.14);
+  --card:   rgba(255,255,255,.92);
+  --radius: 18px;
+  --shadow: 0 18px 50px rgba(46,12,90,.22);
+}
+
+/* Optional global font:
+html,body{font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
+*/
+
+/* ===========================
+   PAGE + BACKDROP
+=========================== */
+.al-root{
+  position:relative;
+  min-height:100vh;
+  display:flex; align-items:center; justify-content:center;
+  padding:28px;
+  background-size:cover; background-position:center; background-repeat:no-repeat;
+}
+
+/* subtle vignette + tint for readability over the bg image */
+.al-root::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(900px 600px at 110% 105%, rgba(123,44,191,.22), transparent 60%),
+    radial-gradient(1100px 700px at -10% -10%, rgba(123,44,191,.24), transparent 60%),
+    rgba(17, 10, 38, .28);
+}
+
+/* ===========================
+   CARD (glassy + gradient border)
+=========================== */
+.al-card{
+  position:relative; z-index:1;
+  width:min(820px, 100%);
+  background: var(--card);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+          backdrop-filter: blur(12px) saturate(120%);
+  border-radius: var(--radius);
+  padding: 26px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+/* gradient edge */
+.al-card::after{
+  content:"";
+  position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  padding:1px;
+  background: linear-gradient(135deg, #ffffffaa, #cdb7ff55, #ffffffaa);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+/* ===========================
+   HEADER
+=========================== */
+.al-title{
+  margin:0 0 6px;
+  font-size: clamp(24px, 3.2vw, 32px);
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.al-sub{ margin:8px 0 12px; color: var(--ink-2); }
+
+/* optional dot accent if you want:
+   <span class="al-dot" aria-hidden="true"></span> before the title */
+.al-dot{
+  display:inline-block; width:10px; height:10px; border-radius:50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  box-shadow: 0 0 0 6px rgba(111,53,200,.18);
+  vertical-align:middle; margin-right:8px;
+}
+
+/* ===========================
+   ALERTS
+=========================== */
+.al-alert{
+  padding:10px 12px; border-radius:12px; margin:12px 0;
+  border:1px solid transparent;
+}
+.al-alert--error{ background:#fff3f3; color:#a04949; border-color:#f0d1d1; }
+.al-alert--ok   { background:#f3fff6; color:#2a7c4b; border-color:#ccefd8; }
+
+/* ===========================
+   FORM
+=========================== */
+.al-form label{
+  display:block;
+  font-weight:600;
+  color:var(--ink);
+  margin:12px 0 6px;
+}
+.al-form input{
+  width:100%; font:inherit; background:#fbfaff;
+  border:1px solid #e6e0f5; padding:12px 14px; border-radius:12px; outline:none;
+  transition:border-color .16s ease, box-shadow .16s ease, background .16s ease, transform .04s ease;
+}
+.al-form input::placeholder{ color:#b8b1d7; }
+.al-form input:hover{ transform: translateY(-1px); }
+.al-form input:focus-visible{
+  border-color: var(--primary);
+  box-shadow: 0 0 0 6px var(--ring);
+  background:#fff;
+}
+.al-form input:disabled{
+  opacity:.7; cursor:not-allowed; background:#f6f3ff;
+}
+
+/* optional validation helpers (toggle these from JS if needed) */
+.al-form input.is-invalid{
+  border-color:#d64545 !important;
+  box-shadow:0 0 0 6px rgba(214,69,69,.12) !important;
+}
+.al-form input.is-valid{
+  border-color:#2a7c4b !important;
+  box-shadow:0 0 0 6px rgba(42,124,75,.12) !important;
+}
+
+/* password reveal pill */
+.al-input-wrap{ position:relative; }
+.al-eye{
+  position:absolute; right:8px; top:50%; transform:translateY(-50%);
+  border:none; background:linear-gradient(135deg, #efeaff, #f6f2ff);
+  color:#5c4aa1; font-weight:700; padding:6px 10px; border-radius:999px; cursor:pointer;
+  transition: filter .15s ease, transform .1s ease, box-shadow .15s ease;
+  box-shadow: 0 2px 6px rgba(92,74,161,.18);
+}
+.al-eye:hover{  filter:brightness(.97); box-shadow:0 4px 10px rgba(92,74,161,.22); }
+.al-eye:active{ transform:translateY(-48%); }
+.al-eye:disabled{ opacity:.6; cursor:not-allowed; }
+
+/* ===========================
+   BUTTON
+=========================== */
+.al-btn{
+  margin-top:16px; width:100%; border:none; padding:14px 16px;
+  font-weight:800; border-radius:12px; color:#fff; cursor:pointer;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  box-shadow: 0 14px 28px rgba(111,53,200,.30);
+  transition: transform .08s ease, box-shadow .15s ease, filter .15s ease, opacity .15s ease;
+}
+.al-btn:hover{  transform: translateY(-1px); box-shadow: 0 18px 36px rgba(111,53,200,.36); }
+.al-btn:active{ transform: translateY(0);    filter:brightness(.97); }
+.al-btn:disabled{ opacity:.6; cursor:not-allowed; box-shadow:none; }
+
+/* Optional loading modifier: add .al-btn--loading when submitting */
+.al-btn.al-btn--loading{
+  position:relative; color:transparent !important;
+}
+.al-btn.al-btn--loading::after{
+  content:""; position:absolute; inset:0; margin:auto;
+  width:18px; height:18px; border-radius:50%;
+  border:3px solid rgba(255,255,255,.5);
+  border-top-color:#fff;
+  animation: al-spin .8s linear infinite;
+}
+@keyframes al-spin{ to{ transform: rotate(360deg); } }
+
+/* ===========================
+   FOOTER LINKS
+=========================== */
+.al-foot{
+  margin-top:16px; display:flex; gap:16px; justify-content:space-between; flex-wrap:wrap;
+}
+.al-link{
+  color:#5531c5; text-decoration:none; font-weight:700;
+  padding:4px 2px; text-decoration-thickness:2px; text-underline-offset:2px;
+}
+.al-link:hover{ text-decoration:underline; }
+
+/* ===========================
+   REDUCED MOTION
+=========================== */
+@media (prefers-reduced-motion: reduce){
+  .al-form input,
+  .al-btn,
+  .al-eye{
+    transition:none !important;
+  }
+}
