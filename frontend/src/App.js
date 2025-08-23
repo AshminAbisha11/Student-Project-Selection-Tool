@@ -23,14 +23,13 @@ import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';
 import SupervisorProposalsPage from './pages/supervisorProposalPage';
 import SupervisorAllocatedStudentsPage from './pages/supervisorAllocatedStudentsPage';
 
-
 // Support Page
 import HelpSupportPage from './pages/helpSupportPage';
+
+// Admin Pages
 import AdminDashboardPage from './pages/adminDashboardPage';
-
-
-// Admin Pages (NEW)
 import AdminSignupPage from './pages/adminSignupPage';
+import AdminLoginPage from './pages/adminLoginPage'; // NEW
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -152,6 +151,7 @@ function App() {
 
         {/* Admin Routes */}
         <Route path="/admin-signup" element={<AdminSignupPage />} />
+        <Route path="/admin-login" element={<AdminLoginPage />} /> {/* NEW */}
         <Route
           path="/admin"
           element={

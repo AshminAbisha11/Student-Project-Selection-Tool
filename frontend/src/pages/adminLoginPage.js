@@ -4,8 +4,8 @@ import axios from 'axios';
 import './adminLoginPage.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-const ADMIN_LOGIN_PATH =
-  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login'; // or '/auth/admin-login'
+// Make sure this matches your backend route (e.g. '/auth/admin-login' or '/admin-login')
+const ADMIN_LOGIN_PATH = process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -19,14 +19,44 @@ export default function AdminLoginPage() {
     setForm((v) => ({ ...v, [k]: e.target.value }));
   };
 
+  const mapError = (e) => {
+    const status = e?.response?.status;
+    const msgRaw = e?.response?.data?.message || '';
+    const msg = String(msgRaw).toLowerCase();
+
+    // Not an admin (preferred UX)
+    if (status === 403 || msg.includes('not an admin')) {
+      return 'This account is not an admin. Please use the Student/Supervisor login.';
+    }
+    // Endpoint not found (wrong path / route not mounted)
+    if (status === 404) {
+      return 'Admin login endpoint not found. Please check your server route or ADMIN_LOGIN_PATH.';
+    }
+    // Common auth messages
+    if (status === 400 && msg.includes('user not found')) {
+      return 'We couldn’t find an account with that email. If you are a student or supervisor, use the regular login.';
+    }
+    if (status === 400 && (msg.includes('password') || msg.includes('does not match'))) {
+      return 'Incorrect email or password.';
+    }
+    // Network / fallback
+    if (e?.message === 'Network Error') {
+      return 'Unable to reach the server. Please check your connection and try again.';
+    }
+    return msgRaw || 'Login failed. Please try again.';
+  };
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.email || !form.password || submitting) return;
+    if (!form.email || !form.password) {
+      setErr('Please fill in both fields.');
+      return;
+    }
 
     try {
       setSubmitting(true);
 
-      // clear stale auth
+      // Clear any stale auth
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('role');
@@ -42,9 +72,10 @@ export default function AdminLoginPage() {
         return;
       }
 
+      // Belt & braces: ensure role is admin
       const role = String(data.user.role || '').toLowerCase();
       if (role !== 'admin') {
-        setErr('This account is not an admin. Please use the user login.');
+        setErr('This account is not an admin. Please use the Student/Supervisor login.');
         return;
       }
 
@@ -54,17 +85,7 @@ export default function AdminLoginPage() {
 
       navigate('/admin', { replace: true });
     } catch (e2) {
-      // friendlier error messages
-      const status = e2?.response?.status;
-      const msg =
-        e2?.response?.data?.message ||
-        (status === 404
-          ? 'Login endpoint not found. Check ADMIN_LOGIN_PATH.'
-          : status === 403
-          ? 'This account is not an admin. Please use the user login.'
-          : 'Login failed. Please check your details.');
-
-      setErr(msg);
+      setErr(mapError(e2));
     } finally {
       setSubmitting(false);
     }
@@ -79,24 +100,28 @@ export default function AdminLoginPage() {
         <h1 className="al-title">Admin Login</h1>
         <p className="al-sub">Use your admin email and password.</p>
 
-        {err && <div className="al-alert al-alert--error">{err}</div>}
+        {err && (
+          <div className="al-alert al-alert--error" role="alert" aria-live="polite">
+            {err}
+          </div>
+        )}
 
         <form className="al-form" onSubmit={submit} noValidate>
-          <label>Email
+          <label>
+            Email
             <input
               type="email"
               value={form.email}
               onChange={update('email')}
               placeholder="you@aston.ac.uk or you@gmail.com"
               autoComplete="email"
-              inputMode="email"
-              spellCheck="false"
-              required
               disabled={submitting}
+              required
             />
           </label>
 
-          <label>Password
+          <label>
+            Password
             <div className="al-input-wrap">
               <input
                 type={showPw ? 'text' : 'password'}
@@ -104,14 +129,12 @@ export default function AdminLoginPage() {
                 onChange={update('password')}
                 placeholder="Password"
                 autoComplete="current-password"
-                required
                 disabled={submitting}
+                required
               />
               <button
                 type="button"
                 className="al-eye"
-                aria-label={showPw ? 'Hide password' : 'Show password'}
-                aria-pressed={showPw}
                 onClick={() => setShowPw((s) => !s)}
                 disabled={submitting}
               >
@@ -120,25 +143,14 @@ export default function AdminLoginPage() {
             </div>
           </label>
 
-          <button
-            className={`al-btn ${submitting ? 'al-btn--loading' : ''}`}
-            type="submit"
-            disabled={submitting}
-            aria-disabled={submitting}
-          >
-            {submitting ? 'Signing in…' : 'Login'}
+          <button className={`al-btn ${submitting ? 'al-btn--loading' : ''}`} type="submit" disabled={submitting}>
+            {submitting ? 'Logging in…' : 'Login'}
           </button>
         </form>
 
-        {/* Nicer footer links, matching the admin signup page */}
         <div className="al-foot">
-          <Link to="/admin-signup" className="al-link al-link--underline">
-            Need to create an admin account?
-          </Link>
-          <span className="al-spacer" />
-          <Link to="/login" className="al-link al-link--arrow">
-            Back to user login
-          </Link>
+          <Link to="/admin-signup" className="al-link">Need to create an admin account?</Link>
+          <Link to="/login" className="al-link">Back to user login</Link>
         </div>
       </div>
     </div>
