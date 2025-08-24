@@ -1,0 +1,225 @@
+:root{
+  --primary:   #6f35c8;
+  --primary-2: #8a54ff;
+  --ink:   #2f2a55;
+  --ink-2: #6c6892;
+  --muted: #9aa0b5;
+  --ring: rgba(123,44,191,.22);
+  --card: rgba(255,255,255,.96);
+  --border: rgba(123,44,191,.14);
+  --shadow: 0 18px 50px rgba(46,12,90,.14);
+  --radius: 16px;
+}
+
+/* ===========================
+   CONTENT GRID (areas)
+   =========================== */
+.ah-grid{
+  display: grid;
+  gap: 22px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+
+  /* Cycle gets more width than Quick */
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-areas:
+    "hero  hero"
+    "cycle quick";
+}
+
+/* Assign cards to areas */
+.as-card.hero  { grid-area: hero; }
+.as-card.cycle { grid-area: cycle; }
+.as-card.quick { grid-area: quick; }
+
+/* Responsive: stack on small screens */
+@media (max-width: 900px){
+  .ah-grid{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "hero"
+      "cycle"
+      "quick";
+  }
+}
+
+/* ===========================
+   CARDS (shared)
+   =========================== */
+.as-card{
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 22px;
+  width: 100%;
+}
+
+.as-title{
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+/* ===========================
+   HERO (Welcome) – compact row
+   =========================== */
+.as-card.hero{
+  padding: 22px 24px;
+}
+
+.hero-row{
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.hero-spacer{ flex: 1; }
+
+/* Slightly larger avatar in hero */
+.as-card.hero .ah-avatar{
+  width: 56px;
+  height: 56px;
+  font-size: 18px;
+}
+
+/* ===========================
+   CYCLE CARD — a bit larger
+   =========================== */
+.as-card.cycle{
+  padding: 26px 28px;
+  min-height: 220px;
+}
+.as-card.cycle .as-title{
+  font-size: 20px;
+}
+.as-card.cycle .ah-rows{
+  font-size: 15px;
+  row-gap: 12px;
+}
+
+/* ===========================
+   PROFILE MINI
+   =========================== */
+.ah-profile{ display:flex; align-items:center; gap:12px; margin:6px 0 12px; }
+
+.ah-avatar{
+  width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+
+.ah-user h4{ margin: 0 0 2px; color: var(--ink); }
+.ah-user small{ display: block; color: var(--ink-2); }
+.ah-role{ color: #7a749f; }
+
+/* ===========================
+   DEFINITION ROWS
+   =========================== */
+.ah-rows{ margin-top: 6px; font-size: 14px; }
+.ah-rows .row{
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px 18px;
+}
+.ah-rows dt{ color: var(--ink-2); }
+.ah-rows dd{ margin: 0; color: var(--ink); font-weight: 700; }
+
+/* ===========================
+   PILLS
+   =========================== */
+.ah-pill{
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px;
+  border: 1px solid transparent; margin-right: 8px;
+}
+.ah-pill.ok{ background: #eefcf5; color: #18794e; border-color: #b7ead0; }
+
+/* ===========================
+   PRIMARY/AUX BUTTONS
+   =========================== */
+.ah-actions{ margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+.as-btn{
+  appearance: none; border: none; cursor: pointer; user-select: none;
+  font-weight: 800; border-radius: 12px; padding: 10px 14px; transition: .15s;
+  box-shadow: 0 8px 18px rgba(111,53,200,.20);
+}
+.as-btn:hover{ transform: translateY(-1px); box-shadow: 0 12px 24px rgba(111,53,200,.26); }
+.as-btn:active{ transform: translateY(0); }
+.as-btn:focus-visible{ outline: none; box-shadow: 0 0 0 6px var(--ring); }
+
+.as-btn--primary{
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+}
+.as-btn--ghost{
+  background: linear-gradient(135deg, #efeaff, #f6f2ff);
+  color: #5c4aa1; font-weight: 700; border: 1px solid #e8e1ff;
+}
+
+/* ===========================
+   QUICK ACTIONS — button look
+   =========================== */
+.ah-quick{
+  display: grid;
+  gap: 12px;
+}
+
+.ah-qa{
+  appearance: none;
+  cursor: pointer;
+  user-select: none;
+
+  /* button shape & spacing */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+
+  /* filled button feel */
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  color: #fff;
+  border: 0;
+
+  /* motion & depth */
+  box-shadow: 0 8px 18px rgba(111,53,200,.25);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+  font-weight: 800;
+  text-align: left;
+}
+
+.ah-qa:hover{
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(111,53,200,.32);
+  filter: brightness(1.02);
+}
+
+.ah-qa:active{
+  transform: translateY(0);
+  box-shadow: 0 6px 12px rgba(111,53,200,.22);
+  filter: brightness(.98);
+}
+
+.ah-qa:focus-visible{
+  outline: none;
+  box-shadow:
+    0 0 0 6px var(--ring),
+    0 10px 22px rgba(111,53,200,.25);
+}
+
+/* icon badge inside the button */
+.ah-qa .icon{
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.18);
+}

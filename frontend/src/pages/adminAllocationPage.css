@@ -1,0 +1,205 @@
+/* =========================================================
+   Admin Dashboard – aesthetic UI (glass + purple theme)
+   Prefix: adbd-
+   ========================================================= */
+
+/* ---- Theme tokens ---- */
+:root{
+  --primary:   #6f35c8;
+  --primary-2: #8a54ff;
+
+  --ink:   #2f2a55;
+  --ink-2: #6c6892;
+  --muted: #9aa0b5;
+
+  --card:   rgba(255,255,255,.92);
+  --border: rgba(123,44,191,.14);
+  --ring:   rgba(123,44,191,.22);
+
+  --shadow: 0 18px 50px rgba(46,12,90,.18);
+  --radius: 16px;
+}
+
+/* ---- Page shell ---- */
+.adbd-root{
+  position:relative;
+  min-height:100vh;
+  padding:24px;
+  background-size:cover; background-position:center; background-repeat:no-repeat;
+}
+.adbd-root::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(1000px 700px at 110% 110%, rgba(123,44,191,.18), transparent 60%),
+    radial-gradient(1200px 800px at -10% -10%, rgba(123,44,191,.20), transparent 60%),
+    rgba(17,10,38,.18);
+}
+
+/* ---- Layout grid ---- */
+.adbd-grid{
+  position:relative; z-index:1;
+  display:grid; gap:22px;
+  grid-template-columns: 1.05fr 1fr;
+}
+@media (max-width: 980px){
+  .adbd-grid{ grid-template-columns: 1fr; }
+}
+
+/* ---- Card ---- */
+.adbd-card{
+  background:var(--card);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+          backdrop-filter: blur(12px) saturate(120%);
+  border-radius: var(--radius);
+  border:1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding:20px 22px;
+  position:relative;
+}
+.adbd-card::after{
+  /* subtle gradient edge */
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  padding:1px; background:linear-gradient(135deg,#ffffffaa,#cdb7ff55,#ffffffaa);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude;
+}
+
+/* ---- Head ---- */
+.adbd-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.adbd-title{ margin:0; font-weight:800; font-size:20px; color:var(--ink); letter-spacing:.2px; }
+.adbd-actions{ display:flex; gap:10px; flex-wrap:wrap; }
+
+/* ---- Definition list (label/value rows) ---- */
+.adbd-dl{
+  display:grid;
+  grid-template-columns: 1fr minmax(280px, auto);
+  row-gap:10px; column-gap:18px;
+  font-size:14px;
+}
+.adbd-dl dt{ color:var(--ink-2); }
+.adbd-dl dd{ margin:0; color:var(--ink); font-weight:700; }
+.adbd-dl-row{ display:contents; }
+.adbd-dl-row + .adbd-dl-row::before{
+  content:""; grid-column:1 / -1; height:1px; background:rgba(123,44,191,.08);
+  margin:8px 0;
+}
+@media (max-width:680px){
+  .adbd-dl{ grid-template-columns: 1fr; }
+}
+
+/* ---- Edit-mode inputs ---- */
+.adbd-input{
+  width: 100%;
+  max-width: 340px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(123,44,191,.16);
+  background: #fbfaff;
+  color: #2f2a55;
+  font: inherit;
+  outline: none;
+  transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+}
+.adbd-input::placeholder{ color:#a9a3c6; }
+.adbd-input:focus{
+  border-color: var(--primary);
+  box-shadow: 0 0 0 6px var(--ring);
+  background:#fff;
+}
+.adbd-input:disabled{ opacity:.7; cursor:not-allowed; background:#f3f0ff; }
+.adbd-input--sm{ max-width: 260px; }
+.adbd-input--error{ border-color:#d64545 !important; box-shadow:0 0 0 6px rgba(214,69,69,.12) !important; }
+
+/* ---- Pills (statuses) ---- */
+.adbd-pills{ display:flex; gap:8px; margin:10px 0 6px; flex-wrap:wrap; }
+.adbd-pill{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px; border-radius:999px; font-weight:700; font-size:12px;
+  border:1px solid transparent;
+}
+.adbd-pill--open   { background:#eefcf5; color:#18794e; border-color:#b7ead0; }
+.adbd-pill--warn   { background:#fff7e6; color:#ad6a00; border-color:#ffe1a8; }
+.adbd-pill--closed { background:#ffeef0; color:#9b1c1c; border-color:#f7c7cd; }
+
+/* ---- Countdown blocks ---- */
+.adbd-timers{
+  margin-top:10px; display:grid; grid-template-columns: 1fr 1fr; gap:12px;
+}
+@media (max-width:680px){ .adbd-timers{ grid-template-columns: 1fr; } }
+.adbd-count{
+  background: linear-gradient(180deg,#ffffffcc,#faf8ff);
+  border:1px solid rgba(123,44,191,.12);
+  border-radius:12px; padding:10px 12px;
+}
+.adbd-count label{ display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+.adbd-count .adbd-time{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size:18px; font-weight:800; letter-spacing:2px; color:#1e1a3a;
+}
+
+/* ---- Regular buttons ---- */
+.adbd-btn{
+  appearance:none; border:none; cursor:pointer; user-select:none;
+  font-weight:800; border-radius:12px; padding:10px 14px; transition:.15s;
+  box-shadow: 0 8px 18px rgba(111,53,200,.20);
+}
+.adbd-btn:disabled{ opacity:.6; cursor:not-allowed; box-shadow:none; }
+.adbd-btn:hover{ transform: translateY(-1px); box-shadow:0 12px 24px rgba(111,53,200,.26); }
+.adbd-btn:active{ transform: translateY(0); }
+.adbd-btn:focus-visible{ outline:none; box-shadow:0 0 0 6px var(--ring); }
+
+.adbd-btn--primary{
+  color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));
+}
+.adbd-btn--ghost{
+  background:linear-gradient(135deg,#efeaff,#f6f2ff);
+  color:#5c4aa1; font-weight:700; border:1px solid #e8e1ff;
+}
+
+/* ---- Small "chip" buttons (Open now / Close now / Commit now) ---- */
+.adbd-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:6px 10px; border-radius:999px; border:1px solid #e6e0f5;
+  background:#efeaff; color:#4b2ea8; font-weight:700; font-size:12px;
+  cursor:pointer; transition: filter .15s ease, transform .08s ease, box-shadow .15s ease;
+  box-shadow: 0 2px 6px rgba(92,74,161,.18);
+}
+.adbd-chip--warn{
+  background:#fff1f1; border-color:#f1caca; color:#a04949;
+  box-shadow: 0 2px 6px rgba(160,73,73,.18);
+}
+.adbd-chip:hover{ filter:brightness(.98); transform: translateY(-1px); }
+.adbd-chip:active{ transform: translateY(0); }
+.adbd-chip:disabled{ opacity:.6; cursor:not-allowed; box-shadow:none; }
+.adbd-chip:focus-visible{ outline:none; box-shadow:0 0 0 6px var(--ring); }
+
+/* ---- Alerts (success / error) ---- */
+.adbd-alert{
+  margin-top:8px; padding:10px 12px; border-radius:10px; border:1px solid transparent;
+  font-size:14px;
+}
+.adbd-alert--ok{    background:#f3fff6; color:#2a7c4b; border-color:#ccefd8; }
+.adbd-alert--error{ background:#fff3f3; color:#a04949; border-color:#f0d1d1; }
+
+/* ---- Table (preview list) ---- */
+.adbd-table{
+  width:100%; border-collapse:separate; border-spacing:0; margin-top:10px; font-size:14px;
+  border:1px solid rgba(123,44,191,.12); border-radius:12px; overflow:hidden;
+}
+.adbd-table thead th{
+  background:#f7f5ff; text-align:left; color:#4a4378; font-weight:700; padding:10px 12px;
+  border-bottom:1px solid rgba(123,44,191,.10);
+}
+.adbd-table tbody td{ padding:10px 12px; border-bottom:1px solid rgba(123,44,191,.06); color:#2f2a55; }
+.adbd-table tbody tr:hover{ background:#fbfaff; }
+
+/* ---- Inline helper spacing ---- */
+.adbd-spacer{ flex:1; }
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce){
+  .adbd-btn, .adbd-chip{ transition:none !important; }
+}

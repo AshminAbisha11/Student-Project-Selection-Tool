@@ -7,7 +7,7 @@ import './adminLoginPage.css';
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 // Set this to your actual backend route. If your server mounts under /auth, set it to '/auth/admin-login'
 const ADMIN_LOGIN_PATH =
-  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/auth/admin-login';
+  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
