@@ -1,0 +1,110 @@
+/* ====== Theme tokens ====== */
+:root{
+  --primary:   #6f35c8;
+  --primary-2: #8a54ff;
+
+  --ink:   #2f2a55;
+  --ink-2: #6b5fa0;
+
+  --hover: #f3f0ff;
+  --border: #eee9ff;
+}
+
+/* ====== Page shell with soft overlay ====== */
+.admin-shell{
+  min-height:100vh;
+  display:flex;
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+  position:relative;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+}
+.admin-shell::before{
+  content:"";
+  position:absolute; inset:0;
+  background: linear-gradient(180deg, rgba(255,255,255,.50), rgba(255,255,255,.40));
+  pointer-events:none;
+  z-index:0;
+}
+
+/* keep shell children above the overlay */
+.as-sidebar,
+.admin-main{ position:relative; z-index:1; }
+
+/* ====== Sidebar ====== */
+.as-sidebar{
+  width: 260px;
+  padding: 22px 18px;
+  background: rgba(255,255,255,.94);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+          backdrop-filter: blur(10px) saturate(120%);
+  border-right: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(46,12,90,.08);
+  display:flex; flex-direction:column;
+  z-index:2; /* sits above overlay */
+}
+.as-brand{
+  width: 170px; height:auto; display:block;
+  margin: 0 0 18px;
+}
+
+/* Nav */
+.as-nav{ display:flex; flex-direction:column; gap:10px; height:100%; }
+
+.as-navlink{
+  display:flex; align-items:center; gap:12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor:pointer; text-align:left;
+  transition: background .15s ease, transform .06s ease, border-color .15s ease;
+}
+.as-navlink:hover{
+  background: var(--hover);
+  border-color: var(--border);
+}
+.as-navlink.active{
+  background:#fff;
+  border-color: var(--border);
+  box-shadow: 0 2px 12px rgba(47,42,85,.06);
+}
+.as-navlink .icon{
+  width:18px; height:18px;
+  display:inline-grid; place-items:center;
+  font-size:18px;
+}
+.as-nav-spacer{ flex:1; }
+
+.as-navlink.danger{
+  color:#9b1c1c;
+}
+.as-navlink.danger:hover{
+  background:#fff0f1;
+  border-color:#ffd6db;
+}
+
+/* ====== Main area (FULL WIDTH) ====== */
+.admin-main{
+  flex: 1;                 /* fill all space to the right of sidebar */
+  width: 100%;
+  max-width: none;         /* remove cap so it can stretch */
+  box-sizing: border-box;
+  padding: 28px 32px;
+}
+
+/* Optional: mobile tweaks */
+@media (max-width: 960px){
+  .as-sidebar{
+    position:fixed;
+    inset:auto auto 0 0;
+    width: 86vw;
+    max-width: 320px;
+    border-right:none;
+  }
+  .admin-main{ padding:18px; }
+}

@@ -1,14 +1,17 @@
+// src/pages/adminLoginPage.jsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import './adminLoginPage.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-// Make sure this matches your backend route (e.g. '/auth/admin-login' or '/admin-login')
-const ADMIN_LOGIN_PATH = process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login';
+// Set this to your actual backend route. If your server mounts under /auth, set it to '/auth/admin-login'
+const ADMIN_LOGIN_PATH =
+  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
+
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState('');
@@ -19,51 +22,38 @@ export default function AdminLoginPage() {
     setForm((v) => ({ ...v, [k]: e.target.value }));
   };
 
-  const mapError = (e) => {
-    const status = e?.response?.status;
-    const msgRaw = e?.response?.data?.message || '';
-    const msg = String(msgRaw).toLowerCase();
-
-    // Not an admin (preferred UX)
-    if (status === 403 || msg.includes('not an admin')) {
-      return 'This account is not an admin. Please use the Student/Supervisor login.';
-    }
-    // Endpoint not found (wrong path / route not mounted)
-    if (status === 404) {
-      return 'Admin login endpoint not found. Please check your server route or ADMIN_LOGIN_PATH.';
-    }
-    // Common auth messages
-    if (status === 400 && msg.includes('user not found')) {
-      return 'We couldn’t find an account with that email. If you are a student or supervisor, use the regular login.';
-    }
-    if (status === 400 && (msg.includes('password') || msg.includes('does not match'))) {
-      return 'Incorrect email or password.';
-    }
-    // Network / fallback
-    if (e?.message === 'Network Error') {
-      return 'Unable to reach the server. Please check your connection and try again.';
-    }
-    return msgRaw || 'Login failed. Please try again.';
+  const safeNavigate = (to) => {
+    // avoids “Cannot update a component while rendering a different component” in rare cases
+    requestAnimationFrame(() => {
+      try {
+        navigate(to, { replace: true });
+      } catch {
+        window.location.assign(to);
+      }
+    });
   };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.email || !form.password) {
-      setErr('Please fill in both fields.');
+    const email = form.email.trim();
+    const password = form.password;
+
+    if (!email || !password) {
+      setErr('Please fill in both email and password.');
       return;
     }
 
     try {
       setSubmitting(true);
 
-      // Clear any stale auth
+      // Clear any stale session
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('role');
 
       const { data } = await axios.post(
         `${API}${ADMIN_LOGIN_PATH}`,
-        { email: form.email.trim().toLowerCase(), password: form.password },
+        { email, password },
         { headers: { 'Content-Type': 'application/json' } }
       );
 
@@ -72,20 +62,26 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Belt & braces: ensure role is admin
       const role = String(data.user.role || '').toLowerCase();
       if (role !== 'admin') {
-        setErr('This account is not an admin. Please use the Student/Supervisor login.');
+        setErr('This account is not an admin.');
         return;
       }
 
+      // Persist session
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       localStorage.setItem('role', role);
 
-      navigate('/admin', { replace: true });
+      safeNavigate('/admin');
     } catch (e2) {
-      setErr(mapError(e2));
+      const msg =
+        e2?.response?.data?.message ||
+        (e2?.response?.status === 404
+          ? 'Login endpoint not found. Check ADMIN_LOGIN_PATH.'
+          : e2?.message) ||
+        'Login failed';
+      setErr(msg);
     } finally {
       setSubmitting(false);
     }
@@ -98,13 +94,11 @@ export default function AdminLoginPage() {
     >
       <div className="al-card">
         <h1 className="al-title">Admin Login</h1>
-        <p className="al-sub">Use your admin email and password.</p>
+        <p className="al-sub">
+          Use your admin email and password
+        </p>
 
-        {err && (
-          <div className="al-alert al-alert--error" role="alert" aria-live="polite">
-            {err}
-          </div>
-        )}
+        {err && <div className="al-alert">{err}</div>}
 
         <form className="al-form" onSubmit={submit} noValidate>
           <label>
@@ -136,21 +130,26 @@ export default function AdminLoginPage() {
                 type="button"
                 className="al-eye"
                 onClick={() => setShowPw((s) => !s)}
-                disabled={submitting}
+                disabled={submitting || !form.password}
+                aria-label={showPw ? 'Hide password' : 'Show password'}
               >
                 {showPw ? 'Hide' : 'Show'}
               </button>
             </div>
           </label>
 
-          <button className={`al-btn ${submitting ? 'al-btn--loading' : ''}`} type="submit" disabled={submitting}>
-            {submitting ? 'Logging in…' : 'Login'}
+          <button className="al-btn" type="submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Login'}
           </button>
         </form>
 
         <div className="al-foot">
-          <Link to="/admin-signup" className="al-link">Need to create an admin account?</Link>
-          <Link to="/login" className="al-link">Back to user login</Link>
+          <Link to="/admin-signup" className="al-link">
+            Need to create an admin account?
+          </Link>
+          <Link to="/login" className="al-link">
+            Back to user login
+          </Link>
         </div>
       </div>
     </div>

@@ -1,43 +1,44 @@
 // ===== Top-level imports ONLY =====
-import React, { useEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 
 // Authentication Pages
-import RegisterPage from './pages/registerPage';
-import LoginPage from './pages/loginPage';
-import ForgotPasswordPage from './pages/forgotPasswordPage';
-import ResetPasswordPage from './pages/resetPasswordPage';
-import LogoutPage from './pages/logoutPage';
-import ChangePassword from './pages/changePasswordPage';
+import RegisterPage from "./pages/registerPage";
+import LoginPage from "./pages/loginPage";
+import ForgotPasswordPage from "./pages/forgotPasswordPage";
+import ResetPasswordPage from "./pages/resetPasswordPage";
+import LogoutPage from "./pages/logoutPage";
+import ChangePassword from "./pages/changePasswordPage";
 
 // Student Feature Pages
-import StudentDashboard from './pages/studentDashboard';
-import BrowseProjectsPage from './pages/browseProjectsPage';
-import MyPreferencesPage from './pages/myPreferencePage';
-import MyProposalPage from './pages/myProposalPage';
+import StudentDashboard from "./pages/studentDashboard";
+import BrowseProjectsPage from "./pages/browseProjectsPage";
+import MyPreferencesPage from "./pages/myPreferencePage";
+import MyProposalPage from "./pages/myProposalPage";
 
 // Supervisor Pages
-import SupervisorDashboardPage from './pages/supervisorDashboardPage';
-import SupervisorCreateProjectPage from './pages/supervisorCreateProjectPage';
-import SuperVisorMyProjectsPage from './pages/supervisorMyProjectPage';
-import SupervisorProposalsPage from './pages/supervisorProposalPage';
-import SupervisorAllocatedStudentsPage from './pages/supervisorAllocatedStudentsPage';
+import SupervisorDashboardPage from "./pages/supervisorDashboardPage";
+import SupervisorCreateProjectPage from "./pages/supervisorCreateProjectPage";
+import SuperVisorMyProjectsPage from "./pages/supervisorMyProjectPage";
+import SupervisorProposalsPage from "./pages/supervisorProposalPage";
+import SupervisorAllocatedStudentsPage from "./pages/supervisorAllocatedStudentsPage";
 
 // Support Page
-import HelpSupportPage from './pages/helpSupportPage';
+import HelpSupportPage from "./pages/helpSupportPage";
 
-// Admin Pages
-import AdminDashboardPage from './pages/adminDashboardPage';
-import AdminSignupPage from './pages/adminSignupPage';
-import AdminLoginPage from './pages/adminLoginPage'; // NEW
+// Admin Pages (SPLIT)
+import AdminHomePage from "./pages/adminHomePage";                // NEW (light dashboard)
+import AdminAllocationsPage from "./pages/adminAllocationPage";  // NEW (your current allocation UI)
+import AdminSignupPage from "./pages/adminSignupPage";
+import AdminLoginPage from "./pages/adminLoginPage";
 
-const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 /* ============================
  * Small auth helpers (client)
  * ==========================*/
 function parseJwt(token) {
-  try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; }
+  try { return JSON.parse(atob(token.split(".")[1])); } catch { return null; }
 }
 function isTokenValid(token) {
   const payload = parseJwt(token);
@@ -45,22 +46,22 @@ function isTokenValid(token) {
 }
 function getUser() {
   try {
-    const saved = JSON.parse(localStorage.getItem('user') || 'null');
+    const saved = JSON.parse(localStorage.getItem("user") || "null");
     if (saved && saved.role) return saved;
   } catch {}
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem("token");
   const payload = token ? parseJwt(token) : null;
   if (payload && payload.role) return { role: payload.role };
   return null;
 }
 function logoutClient() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
 }
 
 /** Gate for protected pages */
 function ProtectedRoute({ roles, children }) {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem("token");
   if (!token || !isTokenValid(token)) {
     logoutClient();
     return <Navigate to="/login" replace />;
@@ -85,9 +86,8 @@ function RootRedirect() {
     const controller = new AbortController();
 
     (async () => {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
 
-      // local checks first
       if (!token || !isTokenValid(token)) {
         logoutClient();
         setOk(false);
@@ -95,11 +95,10 @@ function RootRedirect() {
         return;
       }
 
-      // server verify (catches blacklisted/revoked)
       try {
         const res = await fetch(`${API}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
-          credentials: 'include',
+          credentials: "include",
           signal: controller.signal,
         });
         setOk(res.ok);
@@ -119,9 +118,9 @@ function RootRedirect() {
   if (!ok) return <Navigate to="/login" replace />;
 
   const role = getUser()?.role?.toLowerCase();
-  if (role === 'admin') return <Navigate to="/admin" replace />;
-  if (role === 'supervisor') return <Navigate to="/supervisor-dashboard" replace />;
-  if (role === 'student') return <Navigate to="/student-dashboard" replace />;
+  if (role === "admin") return <Navigate to="/admin" replace />;
+  if (role === "supervisor") return <Navigate to="/supervisor-dashboard" replace />;
+  if (role === "student") return <Navigate to="/student-dashboard" replace />;
 
   logoutClient();
   return <Navigate to="/login" replace />;
@@ -143,7 +142,7 @@ function App() {
         <Route
           path="/change-password"
           element={
-            <ProtectedRoute roles={['student', 'supervisor', 'admin']}>
+            <ProtectedRoute roles={["student", "supervisor", "admin"]}>
               <ChangePassword />
             </ProtectedRoute>
           }
@@ -151,21 +150,34 @@ function App() {
 
         {/* Admin Routes */}
         <Route path="/admin-signup" element={<AdminSignupPage />} />
-        <Route path="/admin-login" element={<AdminLoginPage />} /> {/* NEW */}
+        <Route path="/admin-login" element={<AdminLoginPage />} />
+
+        {/* Admin Home (light dashboard) */}
         <Route
           path="/admin"
           element={
-            <ProtectedRoute roles={['admin']}>
-              <AdminDashboardPage />
+            <ProtectedRoute roles={["admin"]}>
+              <AdminHomePage />
             </ProtectedRoute>
           }
         />
+        {/* Dedicated allocation runner */}
+        <Route
+          path="/admin/allocations"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AdminAllocationsPage />
+            </ProtectedRoute>
+          }
+        />
+        {/* Convenience alias */}
+        <Route path="/admin/dashboard" element={<Navigate to="/admin" replace />} />
 
         {/* Student Routes (protected) */}
         <Route
           path="/student-dashboard"
           element={
-            <ProtectedRoute roles={['student']}>
+            <ProtectedRoute roles={["student"]}>
               <StudentDashboard />
             </ProtectedRoute>
           }
@@ -173,7 +185,7 @@ function App() {
         <Route
           path="/browse-projects"
           element={
-            <ProtectedRoute roles={['student']}>
+            <ProtectedRoute roles={["student"]}>
               <BrowseProjectsPage />
             </ProtectedRoute>
           }
@@ -181,7 +193,7 @@ function App() {
         <Route
           path="/my-preferences"
           element={
-            <ProtectedRoute roles={['student']}>
+            <ProtectedRoute roles={["student"]}>
               <MyPreferencesPage />
             </ProtectedRoute>
           }
@@ -189,7 +201,7 @@ function App() {
         <Route
           path="/my-proposals"
           element={
-            <ProtectedRoute roles={['student']}>
+            <ProtectedRoute roles={["student"]}>
               <MyProposalPage />
             </ProtectedRoute>
           }
@@ -199,7 +211,7 @@ function App() {
         <Route
           path="/supervisor-dashboard"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SupervisorDashboardPage />
             </ProtectedRoute>
           }
@@ -207,7 +219,7 @@ function App() {
         <Route
           path="/supervisor/create-project"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SupervisorCreateProjectPage />
             </ProtectedRoute>
           }
@@ -215,7 +227,7 @@ function App() {
         <Route
           path="/supervisor/my-projects"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SuperVisorMyProjectsPage />
             </ProtectedRoute>
           }
@@ -223,7 +235,7 @@ function App() {
         <Route
           path="/supervisor/my-projects/archived"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SuperVisorMyProjectsPage />
             </ProtectedRoute>
           }
@@ -232,7 +244,7 @@ function App() {
         <Route
           path="/supervisor/received-proposals"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SupervisorProposalsPage />
             </ProtectedRoute>
           }
@@ -246,7 +258,7 @@ function App() {
         <Route
           path="/supervisor/allocated-students"
           element={
-            <ProtectedRoute roles={['supervisor']}>
+            <ProtectedRoute roles={["supervisor"]}>
               <SupervisorAllocatedStudentsPage />
             </ProtectedRoute>
           }
