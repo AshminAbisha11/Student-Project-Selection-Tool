@@ -1,8 +1,7 @@
-// Backend/middleware/requireAdmin.js
-module.exports = function requireAdmin(req, res, next) {
-  // assumes your auth middleware sets req.user with a 'role' field
-  if (req.user?.role === 'admin') {
-    return next();
+module.exports = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin only' });
   }
-  return res.status(403).json({ message: 'Admin only' });
+  next();
 };
+

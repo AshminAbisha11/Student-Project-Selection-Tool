@@ -1,4 +1,3 @@
-// controllers/preferenceController.js
 const db = require('../config/db');
 
 const VALID_CONTACT = ['Yes', 'No'];
@@ -16,7 +15,6 @@ async function repackOrders(studentId, cycleId) {
   );
   for (let i = 0; i < rows.length; i++) {
     const id = rows[i].preference_id;
-    // pack to 1..N
     await db.query(
       `UPDATE preferences SET preference_order = ? WHERE preference_id = ?`,
       [i + 1, id]
@@ -26,7 +24,6 @@ async function repackOrders(studentId, cycleId) {
 
 /* =======================================================
  * GET /preferences
- * Return the student's preferences (include is_locked!)
  * ===================================================== */
 exports.getPreferencesByStudent = async (req, res) => {
   const studentId = req.user?.user_id;
@@ -37,9 +34,9 @@ exports.getPreferencesByStudent = async (req, res) => {
       p.preference_id,
       p.preference_order,
       p.project_id,
-      p.contacted_supervisor,      -- 'Yes' | 'No'
+      p.contacted_supervisor,
       p.cycle_id,
-      p.is_locked,                 -- << IMPORTANT for FE
+      p.is_locked,
       pr.title,
       pr.description,
       pr.supervisor_name
@@ -59,15 +56,13 @@ exports.getPreferencesByStudent = async (req, res) => {
 };
 
 /* =======================================================
- * GET /preferences/submission  (or /preferences/submitted)
- * Read-only status so FE can show Submitted / Resubmit text
+ * GET /preferences/submission
  * ===================================================== */
 exports.getSubmissionStatus = async (req, res) => {
   try {
     const studentId = req.user?.user_id;
     if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-    // latest submission across cycles (or add WHERE cycle_id = ? if you pass one)
     const [rows] = await db.query(
       `SELECT MAX(submitted_at) AS submitted_at
          FROM preference_submissions
@@ -84,22 +79,18 @@ exports.getSubmissionStatus = async (req, res) => {
 };
 
 /* =======================================================
- * POST /preferences
- * Body: { project_id }
- * Adds a preference (max 5). Defaults contacted_supervisor = 'No'.
- * Saves active cycle_id from req.cycle (set by submissionWindow).
+ * POST /preferences  -> add a preference
  * ===================================================== */
 exports.addPreference = async (req, res) => {
   const student_id = req.user?.user_id;
   const { project_id } = req.body;
-  const cycleId = req.cycle?.cycle_id; // attached by submissionWindow
+  const cycleId = req.cycle?.cycle_id;
 
   if (!student_id) return res.status(401).json({ message: 'Unauthorized' });
   if (!cycleId)   return res.status(403).json({ message: 'No active allocation cycle.' });
   if (!project_id) return res.status(400).json({ message: 'project_id is required' });
 
   try {
-    // Only check within this cycle
     const [existing] = await db.query(
       `SELECT project_id
          FROM preferences
@@ -120,8 +111,8 @@ exports.addPreference = async (req, res) => {
 
     const [result] = await db.query(
       `INSERT INTO preferences
-         (student_id, project_id, preference_order, contacted_supervisor, cycle_id, is_locked)
-       VALUES (?, ?, ?, ?, ?, 0)`,
+         (student_id, project_id, preference_order, contacted_supervisor, cycle_id, is_locked, submitted_at)
+       VALUES (?, ?, ?, ?, ?, 0, NOW())`,
       [student_id, project_id, preference_order, contacted_supervisor, cycleId]
     );
 
@@ -144,9 +135,7 @@ exports.addPreference = async (req, res) => {
 };
 
 /* =======================================================
- * PUT /preferences
- * Body: { preference_id, preference_order }
- * Updates order; enforces ownership.
+ * PUT /preferences -> update order
  * ===================================================== */
 exports.updatePreferenceOrder = async (req, res) => {
   const studentId = req.user?.user_id;
@@ -177,8 +166,6 @@ exports.updatePreferenceOrder = async (req, res) => {
 
 /* =======================================================
  * PATCH /preferences/contacted
- * Body: { preference_id, contacted_supervisor }
- * Toggle 'Have you contacted the supervisor?' flag.
  * ===================================================== */
 exports.updateContactedSupervisor = async (req, res) => {
   const studentId = req.user?.user_id;
@@ -217,7 +204,6 @@ exports.updateContactedSupervisor = async (req, res) => {
 
 /* =======================================================
  * DELETE /preferences/:preferenceId
- * Deletes a preference and compacts the remaining order (cycle-scoped).
  * ===================================================== */
 exports.deletePreference = async (req, res) => {
   const preferenceId = req.params.preferenceId;
@@ -227,7 +213,6 @@ exports.deletePreference = async (req, res) => {
   if (!preferenceId) return res.status(400).json({ message: 'preferenceId is required' });
 
   try {
-    // find its cycle first
     const [[row]] = await db.query(
       `SELECT cycle_id FROM preferences WHERE preference_id = ? AND student_id = ?`,
       [preferenceId, studentId]
@@ -241,7 +226,6 @@ exports.deletePreference = async (req, res) => {
       `DELETE FROM preferences WHERE preference_id = ? AND student_id = ?`,
       [preferenceId, studentId]
     );
-
     if (del.affectedRows === 0) {
       return res.status(404).json({ message: 'Preference not found' });
     }
@@ -255,24 +239,19 @@ exports.deletePreference = async (req, res) => {
 };
 
 /* =======================================================
- * POST /preferences/submit
- * Final submission from My Preferences page.
- * - Validates contacted_supervisor values
- * - Snapshots current list into submission tables
- * - Locks preferences (is_locked = 1)
+ * POST /preferences/submit -> lock + snapshot
  * ===================================================== */
 exports.submitPreferences = async (req, res) => {
   const studentId = req.user?.user_id;
-  const cycleId = req.cycle?.cycle_id; // set by your active-cycle middleware
+  const cycleId = req.cycle?.cycle_id;
 
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
   if (!cycleId)   return res.status(403).json({ message: 'No active allocation cycle.' });
 
-  const conn = await db.getConnection(); // mysql2 pool connection
+  const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    // 1) Read current preferences for this cycle
     const [prefs] = await conn.query(
       `SELECT preference_id, project_id, preference_order, contacted_supervisor, is_locked
          FROM preferences
@@ -286,14 +265,12 @@ exports.submitPreferences = async (req, res) => {
       return res.status(400).json({ message: 'Add at least one preference before submitting.' });
     }
 
-    // Already locked => idempotent success
     const alreadyLocked = prefs.every(p => Number(p.is_locked) === 1);
     if (alreadyLocked) {
       await conn.rollback();
       return res.status(200).json({ message: 'Preferences already submitted.' });
     }
 
-    // 2) Validate contacted flags
     const bad = prefs.find(p => !VALID_CONTACT.includes(p.contacted_supervisor));
     if (bad) {
       await conn.rollback();
@@ -302,7 +279,6 @@ exports.submitPreferences = async (req, res) => {
       });
     }
 
-    // 3) Upsert submission header (one per student/cycle)
     await conn.query(
       `INSERT INTO preference_submissions (student_id, cycle_id, submitted_at, processed)
        VALUES (?, ?, NOW(), 0)
@@ -310,7 +286,6 @@ exports.submitPreferences = async (req, res) => {
       [studentId, cycleId]
     );
 
-    // 4) Get submission_id
     const [[sub]] = await conn.query(
       `SELECT submission_id
          FROM preference_submissions
@@ -319,7 +294,6 @@ exports.submitPreferences = async (req, res) => {
     );
     const submissionId = sub.submission_id;
 
-    // 5) Rewrite snapshot items
     await conn.query(
       `DELETE FROM preference_submission_items WHERE submission_id = ?`,
       [submissionId]
@@ -331,8 +305,6 @@ exports.submitPreferences = async (req, res) => {
       p.preference_order,
       p.contacted_supervisor
     ]);
-
-    // bulk insert (mysql2 format)
     await conn.query(
       `INSERT INTO preference_submission_items
          (submission_id, project_id, pref_order, contacted_supervisor)
@@ -340,7 +312,6 @@ exports.submitPreferences = async (req, res) => {
       [values]
     );
 
-    // 6) Lock the editable prefs so the student can’t change after submit
     await conn.query(
       `UPDATE preferences
           SET is_locked = 1

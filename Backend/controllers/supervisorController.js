@@ -63,10 +63,12 @@ exports.decideProposal = async (req, res) => {
     if (!proposalId) return res.status(400).json({ message: 'proposalId required' });
 
     const normalized = String(status || '').toLowerCase();
-    const allowed = new Set(['accepted', 'rejected', 'under_review', 'submitted']);
-    if (!allowed.has(normalized)) return res.status(400).json({ message: 'Invalid status' });
+    const allowed = new Set(['accepted', 'rejected', 'under_review']);
+    if (!allowed.has(normalized)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
 
-    // Load proposal (need cycle_id, project_id, student_id)
+    // Load proposal
     const [[p]] = await db.query(
       `SELECT proposal_id, student_id, supervisor_id, project_id, cycle_id
          FROM proposals
@@ -75,9 +77,8 @@ exports.decideProposal = async (req, res) => {
     );
     if (!p) return res.status(404).json({ message: 'Not found' });
 
-    // If accepting a student idea (project_id is NULL), ensure pool has a seat and insert allocation
+    // If accepting a student idea (project_id is NULL), allocate into pool project
     if (normalized === 'accepted' && p.project_id == null) {
-      // compute seats left from pool
       const [[pool]] = await db.query(
         `
         SELECT pool.project_id, pool.quota,
@@ -95,25 +96,34 @@ exports.decideProposal = async (req, res) => {
          WHERE pool.is_student_pool = 1
            AND pool.cycle_id       = ?
            AND pool.supervisor_id  = ?
-           AND (pool.status IS NULL OR LOWER(pool.status) IN ('open','approved','active'))
+           AND (pool.approval_status IS NULL OR LOWER(pool.approval_status) IN ('open','approved','active'))
          LIMIT 1
         `,
         [p.cycle_id, supervisorId]
       );
+
       if (!pool || (pool.seats_left ?? 0) <= 0) {
         return res.status(409).json({ message: 'No seats available in student-idea pool.' });
       }
 
-      // insert allocation if not already there
+      // Insert allocation if not already present
       await db.query(
         `INSERT IGNORE INTO allocations
            (cycle_id, project_id, student_id, supervisor_id, proposal_id, status, allocated_at)
-         VALUES (?, NULL, ?, ?, ?, 'allocated', NOW())`,
-        [p.cycle_id, p.student_id, supervisorId, p.proposal_id]
+         VALUES (?, ?, ?, ?, ?, 'allocated', NOW())`,
+        [p.cycle_id, pool.project_id, p.student_id, supervisorId, p.proposal_id]
+      );
+
+      // Update pool project fill count
+      await db.query(
+        `UPDATE projects
+            SET spots_filled = LEAST(spots_filled + 1, quota)
+          WHERE project_id = ?`,
+        [pool.project_id]
       );
     }
 
-    // update proposal status + note
+    // Update proposal status and reason
     await db.query(
       `UPDATE proposals
           SET status = ?, decision_note = ?, updated_at = CURRENT_TIMESTAMP
@@ -129,7 +139,7 @@ exports.decideProposal = async (req, res) => {
 
     res.json(updated);
   } catch (e) {
-    console.error(e);
+    console.error('decideProposal error:', e);
     res.status(500).json({ message: 'Failed to update proposal status' });
   }
 };

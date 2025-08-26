@@ -13,37 +13,45 @@ export default function SubmitProposalPage() {
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null);
 
-  // supervisors accepting ideas
+  // supervisors
   const [supervisors, setSupervisors] = useState([]);
   const [loadingSup, setLoadingSup] = useState(true);
   const [supError, setSupError] = useState('');
   const [supervisorId, setSupervisorId] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [fileKey, setFileKey] = useState(0); // reset file input
+  const [fileKey, setFileKey] = useState(0);
 
   // Success modal
   const [successOpen, setSuccessOpen] = useState(false);
-  const [submittedTo, setSubmittedTo] = useState(null); // { name, email }
+  const [submittedTo, setSubmittedTo] = useState(null);
   const modalRef = useRef(null);
 
   const token = localStorage.getItem('token');
   const authHeaders = useMemo(
-    () => ({ Authorization: token ? `Bearer ${token}` : '' }),
+    () => ({
+      Authorization: token ? `Bearer ${token}` : '',
+    }),
     [token]
   );
 
-  // Load supervisors who are accepting student ideas (with seats left)
+  // ✅ Load supervisors who are accepting student ideas
   useEffect(() => {
     let mounted = true;
     (async () => {
       setSupError('');
       setLoadingSup(true);
       try {
-        const { data } = await axios.get(`${API}/proposals/supervisors/accepting-ideas`);
-        if (mounted) setSupervisors(Array.isArray(data) ? data : []);
+        const { data } = await axios.get(
+          `${API}/proposals/supervisors/accepting-ideas`,
+          { headers: authHeaders }
+        );
+        if (mounted) {
+          setSupervisors(Array.isArray(data) ? data : []);
+        }
       } catch (err) {
         if (mounted) {
+          console.error('Error loading supervisors:', err);
           setSupError('Could not load supervisors.');
           setSupervisors([]);
         }
@@ -51,10 +59,12 @@ export default function SubmitProposalPage() {
         if (mounted) setLoadingSup(false);
       }
     })();
-    return () => { mounted = false; };
-  }, []);
+    return () => {
+      mounted = false;
+    };
+  }, [authHeaders]);
 
-  // Modal: close on ESC
+  // ESC to close modal
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && setSuccessOpen(false);
     document.addEventListener('keydown', onKey);
@@ -75,22 +85,25 @@ export default function SubmitProposalPage() {
       return;
     }
 
-    // ensure selected supervisor is in the accepting list
-    const sup = supervisors.find(s => String(s.supervisor_id) === String(supervisorId));
-    if (!sup) {
-      alert('Selected supervisor is not accepting student proposals right now.');
+    const sup = supervisors.find(
+      (s) => String(s.supervisor_id) === String(supervisorId)
+    );
+    if (!sup || sup.seats_left <= 0) {
+      alert('Selected supervisor has no seats available.');
       return;
     }
 
     const fd = new FormData();
     fd.append('title', title.trim());
     fd.append('description', description.trim());
-    fd.append('supervisor_id', supervisorId);   // student_id comes from JWT on the server
+    fd.append('supervisor_id', supervisorId);
     if (file) fd.append('file', file);
 
     try {
       setSubmitting(true);
-      await axios.post(`${API}/proposals`, fd, { headers: authHeaders });
+      await axios.post(`${API}/proposals`, fd, {
+        headers: { ...authHeaders, 'Content-Type': 'multipart/form-data' },
+      });
 
       setSubmittedTo(sup || null);
       setSuccessOpen(true);
@@ -102,7 +115,9 @@ export default function SubmitProposalPage() {
       setFile(null);
       setFileKey((k) => k + 1);
     } catch (err) {
-      const msg = err?.response?.data?.message || 'Failed to submit proposal.';
+      console.error('Submit proposal error:', err);
+      const msg =
+        err?.response?.data?.message || 'Failed to submit proposal.';
       alert(msg);
     } finally {
       setSubmitting(false);
@@ -120,7 +135,8 @@ export default function SubmitProposalPage() {
           <div className="page-inner">
             <h2>Submit Your Proposal</h2>
             <p className="muted">
-              Only supervisors currently accepting student ideas are shown below. Seats update as offers are accepted.
+              Only supervisors currently accepting student ideas are shown
+              below. Seats update as offers are accepted.
             </p>
 
             <form onSubmit={handleSubmit} className="proposal-form">
@@ -152,8 +168,18 @@ export default function SubmitProposalPage() {
               >
                 <option value="">-- Select Supervisor --</option>
                 {supervisors.map((s) => (
-                  <option key={s.supervisor_id} value={s.supervisor_id}>
-                    {s.name} {s.email ? `(${s.email})` : ''} — {s.seats_left} seats left
+                  <option
+                    key={s.supervisor_id}
+                    value={s.supervisor_id}
+                    disabled={s.seats_left <= 0}
+                  >
+                    {s.name}{' '}
+                    {s.email ? `(${s.email})` : ''} —{' '}
+                    {s.seats_left > 0
+                      ? `${s.seats_left} seat${
+                          s.seats_left > 1 ? 's' : ''
+                        } left`
+                      : 'Full'}
                   </option>
                 ))}
               </select>
@@ -179,9 +205,7 @@ export default function SubmitProposalPage() {
               <button
                 type="submit"
                 disabled={
-                  submitting ||
-                  loadingSup ||
-                  supervisors.length === 0
+                  submitting || loadingSup || supervisors.length === 0
                 }
               >
                 {submitting ? 'Submitting…' : 'Submit Proposal'}
@@ -204,8 +228,8 @@ export default function SubmitProposalPage() {
             <h3 className="modal-title">Proposal submitted</h3>
             <p className="modal-text">
               Your proposal has been submitted to{' '}
-              <strong>{submittedTo?.name || 'the selected supervisor'}</strong>.
-              Please wait for their status/response.
+              <strong>{submittedTo?.name || 'the selected supervisor'}</strong>
+              . Please wait for their response.
             </p>
 
             <div className="modal-actions" style={{ textAlign: 'center' }}>
