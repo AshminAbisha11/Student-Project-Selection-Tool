@@ -45,7 +45,7 @@ export default function SupervisorDashboardPage() {
   const userId = user?.user_id;
   const name = useMemo(() => user?.name || getNameFromToken() || 'Supervisor', [user]);
 
-  // auth + role guard (runs once because deps are stable)
+  // auth + role guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -56,7 +56,7 @@ export default function SupervisorDashboardPage() {
     }
   }, [navigate, token, user, userRole]);
 
-  // load dashboard overview (runs once; token/userId are stable)
+  // load dashboard overview
   useEffect(() => {
     if (!token || !userId) return;
 
@@ -108,20 +108,25 @@ export default function SupervisorDashboardPage() {
           <p>Here’s a quick overview of your project journey</p>
         </div>
 
+        {/* KPI cards */}
         <div className="dashboard-cards">
           <div
             className="dashboard-card"
             onClick={() => navigate('/supervisor/my-projects')}
             style={{ cursor: 'pointer' }}
+            aria-label="View my projects"
+            title="View My Projects"
           >
             <h4>{loading ? '—' : overview.projects}</h4>
-            <p>Projects Supervised</p>
+            <p>Projects Created</p>
           </div>
 
-          <div
+        <div
             className="dashboard-card"
             onClick={() => navigate('/supervisor/received-proposals')}
             style={{ cursor: 'pointer' }}
+            aria-label="Review proposals"
+            title="Review Proposals"
           >
             <h4>{loading ? '—' : overview.pendingProposals}</h4>
             <p>Proposals Pending Review</p>
@@ -131,19 +136,80 @@ export default function SupervisorDashboardPage() {
             className="dashboard-card"
             onClick={() => navigate('/supervisor/allocated-students')}
             style={{ cursor: 'pointer' }}
+            aria-label="View allocated students"
+            title="View Allocated Students"
           >
             <h4>{loading ? '—' : overview.allocatedStudents}</h4>
             <p>Students Allocated</p>
           </div>
         </div>
 
+        {/* Quick Actions */}
         <div className="dashboard-actions">
           <h4>Quick Actions</h4>
-          <button onClick={() => navigate('/supervisor/create-project')}>Add new Project</button>
-          <button onClick={() => navigate('/supervisor/received-proposals')}>Review Proposals</button>
-          <button onClick={() => navigate('/supervisor/allocated-students')}>View Allocated Students</button>
-          <button onClick={() => navigate('/supervisor/my-projects')}>My Projects</button>
+          <div className="qa-row">
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate('/supervisor/create-project')}
+              disabled={loading}
+              title="Create a new project"
+            >
+              Add New Project
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate('/supervisor/my-projects')}
+              disabled={loading}
+              title="Go to My Projects"
+            >
+              My Projects
+            </button>
+          </div>
         </div>
+
+        {/* NEW: Account & Settings (after Quick Actions) */}
+        <section className="dashboard-settings">
+          <h4>Account &amp; Settings</h4>
+          <div className="settings-grid">
+            <button
+              className="settings-card"
+              onClick={() => navigate('/settings/profile')}
+              title="Edit your profile details"
+            >
+              <div className="settings-content">
+                <h5>Profile Settings</h5>
+                <p>Update your name, department and contact details.</p>
+              </div>
+              <span className="settings-cta" aria-hidden>Manage →</span>
+            </button>
+
+            <button
+              className="settings-card"
+              onClick={() => navigate('/settings/password')}
+              title="Change your password"
+            >
+              <div className="settings-content">
+                <h5>Change Password</h5>
+                <p>Choose a strong password and keep your account secure.</p>
+              </div>
+              <span className="settings-cta" aria-hidden>Update →</span>
+            </button>
+
+
+            <button
+              className="settings-card"
+              onClick={() => navigate('/help')}
+              title="Open help and FAQ"
+            >
+              <div className="settings-content">
+                <h5>Help &amp; FAQ</h5>
+                <p>Common questions and ways to contact support.</p>
+              </div>
+              <span className="settings-cta" aria-hidden>Open →</span>
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );
