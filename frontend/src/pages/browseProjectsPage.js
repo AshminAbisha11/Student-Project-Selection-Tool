@@ -1,5 +1,5 @@
 // src/pages/BrowseProjectsPage.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FilterBar from '../components/filterBar';
 import ProjectCard from '../components/projectCard';
@@ -10,29 +10,46 @@ import './browseProjectsPage.css';
 const API = 'http://localhost:5000';
 const PREF_CAP = 5;
 
-// Identify the “student ideas” pool cards
 const isIdeaPoolProject = (p) =>
   p?.is_student_pool === 1 ||
   p?.is_student_proposal === 1 ||
   (typeof p?.topic === 'string' &&
     p.topic.trim().toLowerCase() === 'student proposal ideas');
 
+// de-dupe by project_id
+const uniqueById = (arr) =>
+  Array.from(new Map((arr || []).map(p => [p.project_id, p])).values());
+
 export default function BrowseProjectsPage() {
   const [filters, setFilters] = useState({ supervisor: '', topic: '', keyword: '' });
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
-  const [searchMsg, setSearchMsg] = useState('');
+
+  const [emptyMsg, setEmptyMsg] = useState('');
   const [suggestions, setSuggestions] = useState([]);
 
-  // preferences state
   const [addedPrefs, setAddedPrefs] = useState(() => new Set());
   const [prefIdByProject, setPrefIdByProject] = useState(() => new Map());
   const [prefCount, setPrefCount] = useState(0);
 
   const navigate = useNavigate();
+  const didInit = useRef(false); // prevent double-run in React StrictMode
 
-  // Prime existing preferences for this student
+  // ------------- helpers ----------------
+  const buildFilterQS = (f) => {
+    const qs = new URLSearchParams();
+    if (f.supervisor?.trim()) qs.set('supervisor', f.supervisor.trim());
+    if (f.topic?.trim())      qs.set('topic',      f.topic.trim());
+    if (f.keyword?.trim())    qs.set('keyword',    f.keyword.trim());
+    const s = qs.toString();
+    return s ? `?${s}` : '';
+  };
+
+  const hasAnyFilter = (f) =>
+    Boolean(f.supervisor?.trim() || f.topic?.trim() || f.keyword?.trim());
+
+  // ------------- preferences -------------
   const primeAddedPrefs = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
@@ -42,81 +59,88 @@ export default function BrowseProjectsPage() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      const idsSet = new Set((data || []).map(p => p.project_id));
-      const idMap  = new Map((data || []).map(p => [p.project_id, p.preference_id]));
+      const list = Array.isArray(data) ? data : (data.preferences || []);
+      const idsSet = new Set(list.map(p => p.project_id));
+      const idMap  = new Map(list.map(p => [p.project_id, p.preference_id]));
       setAddedPrefs(idsSet);
       setPrefIdByProject(idMap);
       setPrefCount(idsSet.size);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  // Load all projects
+  // ------------- fetchers ----------------
   const fetchAllProjects = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API}/projects`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load projects');
-      setProjects(Array.isArray(data) ? data : []);
-      setSearchMsg('');
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(uniqueById(list));
+      setEmptyMsg('');
       setSuggestions([]);
     } catch (err) {
       console.error('Error fetching all projects:', err);
       setProjects([]);
+      setEmptyMsg('Failed to load projects.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Load filtered projects
   const fetchProjects = useCallback(async () => {
+    if (!hasAnyFilter(filters)) {
+      fetchAllProjects();
+      return;
+    }
     setLoading(true);
     try {
-      const query = new URLSearchParams(filters).toString();
-      const res = await fetch(`${API}/projects/filters?${query}`);
+      const qs = buildFilterQS(filters);
+      const res = await fetch(`${API}/projects/filters${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered projects');
-      setProjects(data.projects || []);
-      setSearchMsg('');
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(uniqueById(list));
+      setEmptyMsg(list.length ? '' : 'No projects match your filters.');
       setSuggestions([]);
     } catch (err) {
       console.error('Error fetching filtered projects:', err);
-      alert(err.message);
       setProjects([]);
+      setEmptyMsg(err.message || 'No projects found.');
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, fetchAllProjects]);
 
-  // Header search
-  const handleGlobalSearch = useCallback(async (term) => {
+  const handleGlobalSearch = useCallback(async (rawTerm) => {
+    const term = (rawTerm || '').trim();
+    if (!term) {
+      await fetchAllProjects();
+      return;
+    }
     setLoading(true);
     try {
       const qs = new URLSearchParams({ query: term }).toString();
       const res = await fetch(`${API}/projects/search?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Search failed');
-
-      if (Array.isArray(data.projects)) {
-        setProjects(data.projects);
-        setSearchMsg('');
-        setSuggestions([]);
-      } else {
-        setProjects([]);
-        setSearchMsg(data.message || 'No matches found.');
-        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
-      }
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(uniqueById(list));
+      setEmptyMsg(list.length ? '' : 'No matches found.');
+      setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
     } catch (err) {
       console.error('Search error:', err);
       setProjects([]);
-      setSearchMsg(err.message);
+      setEmptyMsg(err.message || 'No matches found.');
       setSuggestions([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAllProjects]);
 
-  // Details modal
+  // ------------- actions -----------------
   const handleViewDetails = async (projectId) => {
     try {
       const res = await fetch(`${API}/projects/details/${projectId}`);
@@ -129,7 +153,6 @@ export default function BrowseProjectsPage() {
     }
   };
 
-  // Add preference (normal projects)
   const handleAddPreference = async (projectId) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -142,14 +165,16 @@ export default function BrowseProjectsPage() {
       return;
     }
 
-    // optimistic update
     setAddedPrefs(prev => new Set(prev).add(projectId));
     setPrefCount(c => c + 1);
 
     try {
       const res = await fetch(`${API}/preferences`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ project_id: projectId }),
       });
       const data = await res.json().catch(() => ({}));
@@ -161,7 +186,6 @@ export default function BrowseProjectsPage() {
         return next;
       });
     } catch (err) {
-      // revert
       setAddedPrefs(prev => { const n = new Set(prev); n.delete(projectId); return n; });
       setPrefCount(c => Math.max(0, c - 1));
       console.error('Error adding preference:', err);
@@ -169,7 +193,6 @@ export default function BrowseProjectsPage() {
     }
   };
 
-  // Remove preference (normal projects)
   const handleRemovePreference = async (projectId) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -179,7 +202,6 @@ export default function BrowseProjectsPage() {
     const prefId = prefIdByProject.get(projectId);
     if (!prefId) return;
 
-    // optimistic
     setAddedPrefs(prev => { const n = new Set(prev); n.delete(projectId); return n; });
     setPrefIdByProject(prev => { const n = new Map(prev); n.delete(projectId); return n; });
     setPrefCount(c => Math.max(0, c - 1));
@@ -194,19 +216,21 @@ export default function BrowseProjectsPage() {
         throw new Error(err.message || 'Failed to remove preference');
       }
     } catch (err) {
-      // re-prime if failure
       await primeAddedPrefs();
       console.error('Remove preference error:', err);
       alert(err.message);
     }
   };
 
-  // Submit proposal for idea pool
   const handleSubmitIdea = (project) => {
+    // supervisor_id comes from users.user_id in the backend now
     navigate(`/submit-proposal?sup=${project.supervisor_id}`);
   };
 
+  // ------------- lifecycle ----------------
   useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
     fetchAllProjects();
     primeAddedPrefs();
   }, [fetchAllProjects, primeAddedPrefs]);
@@ -216,25 +240,32 @@ export default function BrowseProjectsPage() {
 
   const handleReset = () => {
     setFilters({ supervisor: '', topic: '', keyword: '' });
-    setSearchMsg('');
+    setEmptyMsg('');
     setSuggestions([]);
     fetchAllProjects();
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') fetchProjects();
-  };
+  const showAll = useCallback(async () => {
+    setFilters({ supervisor: '', topic: '', keyword: '' });
+    setEmptyMsg('');
+    setSuggestions([]);
+    await fetchAllProjects();
+  }, [fetchAllProjects]);
 
+  // Final guard: even if backend somehow returns dup ids, render unique set
+  const renderList = useMemo(() => uniqueById(projects), [projects]);
+
+  // ------------- render -------------------
   return (
     <>
-      <HeaderBar onSearch={handleGlobalSearch} />
+      <HeaderBar onSearch={handleGlobalSearch} onClear={fetchAllProjects} />
+
       <div className="browse-layout">
         <FilterBar
           filters={filters}
           onChange={handleChange}
           onSearch={fetchProjects}
           onReset={handleReset}
-          onKeyDown={handleKeyDown}
         />
 
         <div className="projects-area">
@@ -250,9 +281,12 @@ export default function BrowseProjectsPage() {
             </div>
           </div>
 
-          {searchMsg && (
+          {!loading && renderList.length === 0 ? (
             <div className="search-feedback" role="status">
-              {searchMsg}
+              {emptyMsg || 'No projects found.'}{' '}
+              <button className="suggestion-chip" onClick={showAll}>
+                Show all projects
+              </button>
               {suggestions.length > 0 && (
                 <span>
                   {' '}Try:{' '}
@@ -264,42 +298,36 @@ export default function BrowseProjectsPage() {
                 </span>
               )}
             </div>
-          )}
+          ) : null}
 
           {loading ? (
             <p>Loading projects...</p>
           ) : (
             <div className="project-grid">
-              {projects.length > 0 ? (
-                projects.map((project) => {
-                  const ideaPool = isIdeaPoolProject(project);
-                  return (
-                    <ProjectCard
-                      key={project.project_id}
-                      project={project}
-                      isAdded={addedPrefs.has(project.project_id)}
-                      isIdeaPool={ideaPool} // some card versions use this to change the label
-                      onViewDetails={() => handleViewDetails(project.project_id)}
-                      // For idea pool cards we pass a dedicated submit handler:
-                      onSubmitIdea={ideaPool ? () => handleSubmitIdea(project) : undefined}
-                      // For older card versions that reuse onAddPreference as primary handler:
-                      onAddPreference={
-                        ideaPool
-                          ? () => handleSubmitIdea(project)
-                          : () => handleAddPreference(project.project_id)
-                      }
-                      onRemovePreference={() => handleRemovePreference(project.project_id)}
-                      disableAdd={
-                        !ideaPool &&
-                        prefCount >= PREF_CAP &&
-                        !addedPrefs.has(project.project_id)
-                      }
-                    />
-                  );
-                })
-              ) : (
-                !searchMsg && <p>No projects found.</p>
-              )}
+              {renderList.map(project => {
+                const ideaPool = isIdeaPoolProject(project);
+                return (
+                  <ProjectCard
+                    key={project.project_id}
+                    project={project}
+                    isAdded={addedPrefs.has(project.project_id)}
+                    isIdeaPool={ideaPool}
+                    onViewDetails={() => handleViewDetails(project.project_id)}
+                    onSubmitIdea={ideaPool ? () => handleSubmitIdea(project) : undefined}
+                    onAddPreference={
+                      ideaPool
+                        ? () => handleSubmitIdea(project)
+                        : () => handleAddPreference(project.project_id)
+                    }
+                    onRemovePreference={() => handleRemovePreference(project.project_id)}
+                    disableAdd={
+                      !ideaPool &&
+                      prefCount >= PREF_CAP &&
+                      !addedPrefs.has(project.project_id)
+                    }
+                  />
+                );
+              })}
             </div>
           )}
         </div>

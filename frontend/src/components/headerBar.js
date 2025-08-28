@@ -1,9 +1,11 @@
+// src/components/headerBar.jsx
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './headerBar.css';
 
-const HeaderBar = () => {
+const HeaderBar = ({ onSearch, onClear }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [term, setTerm] = useState('');
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
 
@@ -37,12 +39,32 @@ const HeaderBar = () => {
     };
   }, []);
 
+  const runSearch = () => {
+    if (onSearch) onSearch(term);
+  };
+
+  const clearSearch = () => {
+    setTerm('');
+    if (onClear) onClear();
+  };
+
+  const onInputKeyDown = (e) => {
+    if (e.key === 'Enter') runSearch();
+    if (e.key === 'Escape') clearSearch();
+  };
+
+  const onInputChange = (e) => {
+    const v = e.target.value;
+    setTerm(v);
+    if (v.trim() === '' && onClear) onClear(); // empty -> show all
+  };
+
   return (
     <header className="header-bar">
-      {/* Brand (no logo) */}
+      {/* Brand (button to dashboard) */}
       <button
         type="button"
-        className="logo-section" // reuse class for spacing
+        className="logo-section"
         onClick={goToDashboard}
         aria-label="Go to dashboard"
         style={{ background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}
@@ -52,8 +74,31 @@ const HeaderBar = () => {
 
       {/* Search + Profile */}
       <div className="search-section">
-        <input type="text" placeholder="Search here" aria-label="Search" />
-        <button className="search-btn" aria-label="Search">🔍</button>
+        <div className="search-input-wrap">
+          <input
+            type="text"
+            value={term}
+            onChange={onInputChange}
+            onKeyDown={onInputKeyDown}
+            placeholder="Search here"
+            aria-label="Search"
+          />
+          {term && (
+            <button
+              type="button"
+              className="search-clear"
+              onClick={clearSearch}
+              aria-label="Clear search"
+              title="Clear"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        <button className="search-btn" aria-label="Search" onClick={runSearch}>
+          🔍
+        </button>
 
         <div className="profile-container" ref={dropdownRef}>
           <div

@@ -72,6 +72,13 @@ export default function MyPreferencesPage() {
     [token]
   );
 
+  // helper: extract a numeric cycle_id from whatever shape /cycle/status returns
+  const getActiveCycleId = () => {
+    const raw = cycle?.cycle_id ?? cycle?.id ?? cycle?.cycleId ?? null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+
   const fetchCycleStatus = async () => {
     try {
       const res = await fetch(`${API}/cycle/status`, { headers: authHeaders });
@@ -88,6 +95,7 @@ export default function MyPreferencesPage() {
 
   const fetchPreferences = async () => {
     try {
+      // backend defaults to active cycle if none provided, so plain GET is fine
       const res = await fetch(`${API}/preferences`, { headers: authHeaders });
       const data = await res.json();
       const list = Array.isArray(data)
@@ -101,16 +109,19 @@ export default function MyPreferencesPage() {
     }
   };
 
-  // NEW: check if already submitted (uses backend GET /preferences/submitted)
+  // Uses backend GET /preferences/submission (not /submitted)
   const fetchSubmissionStatus = async () => {
     try {
-      const res = await fetch(`${API}/preferences/submitted`, { headers: authHeaders });
+      const url = new URL(`${API}/preferences/submission`);
+      const cId = getActiveCycleId();
+      if (cId) url.searchParams.set('cycle_id', cId);
+      const res = await fetch(url, { headers: authHeaders });
       if (!res.ok) return; // silently ignore if endpoint not present
       const data = await res.json();
       setAlreadySubmitted(Boolean(data?.submitted));
       setSubmittedAt(data?.submitted_at || null);
-    } catch (e) {
-      // ignore – we’ll just assume not submitted
+    } catch {
+      // ignore – assume not submitted
     }
   };
 
@@ -154,19 +165,31 @@ export default function MyPreferencesPage() {
     }
   };
 
-  // Submit – allows re-submit; modal copy changes if alreadySubmitted is true
+  // Submit – sends { cycle_id, preferences } in body
   const submitPreferences = async () => {
     if (!isSubmissionOpen) return alert('Submission window is closed.');
     if (preferences.length === 0) return alert('Please add at least one preference.');
     const incomplete = preferences.some(p => !p.contacted_supervisor || p.contacted_supervisor === '');
     if (incomplete) return alert('Please choose Yes/No for all preferences.');
 
+    const cycle_id = getActiveCycleId(); // may be null if no active cycle
+    if (!cycle_id) return alert('No active cycle found.');
+
+    // ordered list of project_ids
+    const prefIds = preferences
+      .slice()
+      .sort((a, b) => a.preference_order - b.preference_order)
+      .map(p => Number(p.project_id))
+      .filter(n => Number.isInteger(n) && n > 0);
+
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/preferences/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ cycle_id, preferences: prefIds }),
       });
+
       const txt = await res.text();
       let payload; try { payload = JSON.parse(txt); } catch { payload = { message: txt || '' }; }
       if (!res.ok) throw new Error(payload?.message || `Submit failed: ${res.status}`);
@@ -186,7 +209,11 @@ export default function MyPreferencesPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchCycleStatus(), fetchPreferences(), fetchSubmissionStatus()]).catch(() => {});
+    // fetch cycle first, then others (status needs cycle when present)
+    (async () => {
+      await fetchCycleStatus();
+      await Promise.all([fetchPreferences(), fetchSubmissionStatus()]);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -314,7 +341,7 @@ export default function MyPreferencesPage() {
                   padding: '10px 14px', borderRadius: 10, marginBottom: 12,
                   background: isSubmissionOpen ? '#e9f7ef' : '#fdecea',
                   color: isSubmissionOpen ? '#1e4620' : '#611a15',
-                  border: `1px solid ${isSubmissionOpen ? '#b7e0c7' : '#f5c6cb'}`,
+                  border: `1px solid ${isSubmissionOpen ? '#b7e0c7' : '#f5c6cb'}`
                 }}
               >
                 {hasActiveCycle ? (

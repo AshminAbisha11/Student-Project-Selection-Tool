@@ -29,18 +29,13 @@ router.post('/create-project', verifyToken, projectController.createProject);
 // My projects (use ?archived=0|1|all)
 router.get('/my', verifyToken, projectController.getMyProjects);
 
-// Archive / Unarchive my project (keep these BEFORE the generic :projectId routes)
+// Archive / Unarchive my project
 router.patch('/:projectId/archive', verifyToken, projectController.archiveProject);
 router.patch('/:projectId/unarchive', verifyToken, projectController.unarchiveProject);
 
-// Fetch one supervisor-owned project (for Edit modal)
+// ⬇️ keep dynamic projectId routes LAST
 router.get('/:projectId', verifyToken, projectController.getMyProjectById);
-
-// Update one supervisor-owned project (from Edit modal)
 router.patch('/:projectId', verifyToken, projectController.updateMyProject);
-
-// Delete one supervisor-owned project
 router.delete('/:projectId', verifyToken, projectController.deleteMyProject);
-
 
 module.exports = router;

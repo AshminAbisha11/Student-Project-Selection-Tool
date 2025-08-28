@@ -43,11 +43,73 @@ function PreferencesModal({ open, onClose, items, loading, error }) {
   );
 }
 
+/* ---------- My Allocation Modal (tidy + no cycle) ---------- */
+function AllocationModal({ open, onClose, data, loading, error }) {
+  if (!open) return null;
+
+  const formatDateTime = (iso) => (iso ? new Date(iso).toLocaleString() : '');
+
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copied to clipboard');
+    } catch {}
+  };
+
+  return createPortal(
+    <div className="ppm-overlay" role="dialog" aria-modal="true" aria-label="My Allocation" onClick={onClose}>
+      <div className="ppm-panel" onClick={(e) => e.stopPropagation()}>
+        <button className="ppm-close" onClick={onClose} aria-label="Close">✕</button>
+        <h3 className="ppm-title">My Allocation</h3>
+
+        {loading ? (
+          <p>Loading…</p>
+        ) : error ? (
+          <p style={{ color: '#b00' }}>{error}</p>
+        ) : !data ? (
+          <div className="ppm-empty">
+            <p>You haven’t been allocated yet.</p>
+            <p className="ppm-meta">Tip: Make sure you’ve added preferences and contacted a supervisor.</p>
+          </div>
+        ) : (
+          <div className="ppm-card alloc-card">
+            <h4 className="alloc-title">{data.project_title}</h4>
+            {data.project_description && <p className="alloc-desc">{data.project_description}</p>}
+
+            <div className="alloc-row">
+              <span className="alloc-label">Supervisor</span>
+              <span className="alloc-value">{data.supervisor_name || '—'}</span>
+            </div>
+
+            {data.supervisor_email && (
+              <div className="alloc-row">
+                <span className="alloc-label">Email</span>
+                <div className="alloc-inline">
+                  <a className="alloc-email" href={`mailto:${data.supervisor_email}`}>{data.supervisor_email}</a>
+                  <button className="ppm-chip" onClick={() => copy(data.supervisor_email)}>Copy email</button>
+                </div>
+              </div>
+            )}
+
+            {data.allocated_at && (
+              <div className="alloc-row">
+                <span className="alloc-label">Allocated</span>
+                <span className="alloc-value">{formatDateTime(data.allocated_at)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export default function StudentDashboard() {
   const navigate = useNavigate();
 
   const [dashboardData, setDashboardData] = useState({
-    stats: { preferencesSubmitted: 0, proposalsSent: 0, applicationStatus: 'Pending' },
+    stats: { preferencesSubmitted: 0, proposalsSent: 0 },
   });
 
   const token = localStorage.getItem('token');
@@ -58,10 +120,17 @@ export default function StudentDashboard() {
   const [showPrefModal, setShowPrefModal] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
 
+  // Allocation state (summary + modal)
+  const [showAllocModal, setShowAllocModal] = useState(false);
+  const [alloc, setAlloc] = useState(null);
+  const [allocLoading, setAllocLoading] = useState(false);
+  const [allocErr, setAllocErr] = useState('');
+
   const [preferences, setPreferences] = useState([]);
   const [prefLoading, setPrefLoading] = useState(false);
   const [prefErr, setPrefErr] = useState('');
 
+  // Auth guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -72,6 +141,7 @@ export default function StudentDashboard() {
     }
   }, [navigate, token, user]);
 
+  // Dashboard stats
   useEffect(() => {
     if (!userId || !token) return;
     let cancelled = false;
@@ -92,18 +162,37 @@ export default function StudentDashboard() {
     return () => { cancelled = true; };
   }, [userId, token, navigate]);
 
+  // Preload allocation so the top section can show a summary
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/allocations/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!cancelled) setAlloc(res.data ?? null);
+      } catch {
+        if (!cancelled) setAlloc(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // ESC closes any modal
   const onEscToClose = useCallback((e) => {
     if (e.key === 'Escape') {
       setShowPrefModal(false);
       setShowProposalModal(false);
+      setShowAllocModal(false);
     }
   }, []);
   useEffect(() => {
-    if (showPrefModal || showProposalModal) {
+    if (showPrefModal || showProposalModal || showAllocModal) {
       document.addEventListener('keydown', onEscToClose);
       return () => document.removeEventListener('keydown', onEscToClose);
     }
-  }, [showPrefModal, showProposalModal, onEscToClose]);
+  }, [showPrefModal, showProposalModal, showAllocModal, onEscToClose]);
 
   const handleShowPreferences = async () => {
     setPrefErr('');
@@ -123,6 +212,24 @@ export default function StudentDashboard() {
 
   const handleShowProposals = () => setShowProposalModal(true);
 
+  // Open My Allocation modal (refetch to be fresh)
+  const handleShowAllocation = async () => {
+    setAllocErr('');
+    setAllocLoading(true);
+    try {
+      const res = await axios.get(`${API}/allocations/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setAlloc(res.data ?? null);
+      setShowAllocModal(true);
+    } catch {
+      setAllocErr('Failed to load allocation.');
+      setShowAllocModal(true);
+    } finally {
+      setAllocLoading(false);
+    }
+  };
+
   return (
     <div className="dashboard-container" style={{ backgroundImage: "url('/assets/login_background.png')" }}>
       <Sidebar />
@@ -138,28 +245,80 @@ export default function StudentDashboard() {
           <p>Here’s a quick overview of your project journey</p>
         </div>
 
-        <div className="dashboard-cards">
-          <div className="dashboard-card" onClick={handleShowPreferences} role="button" aria-haspopup="dialog" aria-label="View Preferred Projects">
-            <h4>{dashboardData.stats.preferencesSubmitted}</h4>
-            <p>Preferred Projects</p>
+        {/* ===== Prominent My Allocation section ===== */}
+        <section className="allocation-section" aria-label="My Allocation">
+          <div className="allocation-card">
+            <div className="allocation-title-row">
+              <h4>My Allocation</h4>
+              <button className="allocation-view" onClick={handleShowAllocation}>
+                View details
+              </button>
+            </div>
+
+            {allocLoading ? (
+              <p className="allocation-muted">Loading…</p>
+            ) : !alloc ? (
+              <p className="allocation-muted">You haven’t been allocated yet.</p>
+            ) : (
+              <div className="allocation-brief">
+                <div className="allocation-brief-title">{alloc.project_title}</div>
+                {alloc.project_description && (
+                  <p className="allocation-brief-desc">{alloc.project_description}</p>
+                )}
+
+                <div className="alloc-row">
+                  <span className="alloc-label">Supervisor</span>
+                  <span className="alloc-value">{alloc.supervisor_name || '—'}</span>
+                </div>
+
+                {alloc.supervisor_email && (
+                  <div className="alloc-row">
+                    <span className="alloc-label">Email</span>
+                    <div className="alloc-inline">
+                      <a className="alloc-email" href={`mailto:${alloc.supervisor_email}`}>{alloc.supervisor_email}</a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ===== Activity / KPI section (highlighted + titled) ===== */}
+        <section className="kpi-section" aria-labelledby="kpi-title">
+          <div className="kpi-header">
+            <h4 id="kpi-title" className="kpi-title">Activity</h4>
           </div>
 
-          <div className="dashboard-card" onClick={handleShowProposals} role="button" aria-haspopup="dialog" aria-label="View Proposals Sent">
-            <h4>{dashboardData.stats.proposalsSent}</h4>
-            <p>Proposals Sent</p>
-          </div>
+          <div className="dashboard-cards kpi-cards">
+            <div
+              className="dashboard-card"
+              onClick={handleShowPreferences}
+              role="button"
+              aria-haspopup="dialog"
+              aria-label="View Preferred Projects"
+            >
+              <h4>{dashboardData.stats.preferencesSubmitted}</h4>
+              <p>Preferred Projects</p>
+            </div>
 
-          <div className="dashboard-card">
-            <h4>{dashboardData.stats.applicationStatus}</h4>
-            <p>Application Status</p>
+            <div
+              className="dashboard-card"
+              onClick={handleShowProposals}
+              role="button"
+              aria-haspopup="dialog"
+              aria-label="View Proposals Sent"
+            >
+              <h4>{dashboardData.stats.proposalsSent}</h4>
+              <p>Proposals Sent</p>
+            </div>
           </div>
-        </div>
+        </section>
 
+        {/* Account Tools */}
         <div className="dashboard-actions">
           <h4>Account Tools</h4>
           <button onClick={() => navigate('/change-password')}>Change Password</button>
-          <button onClick={() => navigate('/profile')}>View Profile</button>
-          <button onClick={() => navigate('/notifications')}>Notification Settings</button>
           <button onClick={() => navigate('/help-support')}>Help & Support</button>
         </div>
       </div>
@@ -173,12 +332,21 @@ export default function StudentDashboard() {
         error={prefErr}
       />
 
-      {/* Proposals (already using a portal component) */}
+      {/* Proposals (portal) */}
       <StudentProposalModal
         isOpen={showProposalModal}
         onClose={() => setShowProposalModal(false)}
         userId={userId}
         token={token}
+      />
+
+      {/* My Allocation (portal) */}
+      <AllocationModal
+        open={showAllocModal}
+        onClose={() => setShowAllocModal(false)}
+        data={alloc}
+        loading={allocLoading}
+        error={allocErr}
       />
     </div>
   );

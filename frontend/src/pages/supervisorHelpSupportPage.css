@@ -1,0 +1,170 @@
+/* reuse in your global/button css */
+.btn.btn-outline{
+  background:#fff;
+  border:1px solid #d8c7ff;
+  color:#45217e;
+}
+.btn.btn-outline:hover{
+  background:#f5f1ff;
+  border-color:#5c2d91;
+}
+
+/* small helpers if needed */
+.help-container { max-width: 900px; margin: 0 auto; padding: 24px; }
+.help-title { margin: 0 0 16px; color: #4b2376; }
+.help-section { background: #fff; border: 1px solid #ece7ff; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.faq-list { margin: 0; padding-left: 18px; }
+.help-note { margin-bottom: 10px; padding: 10px 12px; background: #e9f7ef; border: 1px solid #b7e0c7; color: #1e4620; border-radius: 8px; }
+.help-textarea { width: 100%; border: 1px solid #e0d6ff; border-radius: 10px; padding: 10px 12px; margin: 8px 0 12px; }
+
+
+/* Page wrapper */
+.help-container {
+  background-size: cover;
+  background-position: center;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 56px 20px;
+  box-sizing: border-box;
+}
+
+/* Card */
+.help-card {
+  background: #fff;
+  padding: 2.25rem 2.5rem;
+  border-radius: 16px;
+  max-width: 880px;
+  width: 100%;
+  box-shadow: 0 10px 30px rgba(75, 35, 118, 0.12);
+  border: 1px solid rgba(106, 27, 154, 0.14);
+}
+
+/* Header row: back button + title */
+.help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 1.25rem;
+}
+
+.help-title {
+  color: #4b2376;
+  font-size: 1.85rem;
+  font-weight: 700;
+  margin: 0;
+  text-align: center;
+  flex: 1 1 auto; /* keeps title centered even with back button */
+}
+
+/* Back button */
+.help-back {
+  appearance: none;
+  border: none;
+  background: #6a1b9a;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: filter .15s ease, transform .06s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.help-back:hover { filter: brightness(.96); }
+.help-back:active { transform: translateY(1px); }
+.help-back:focus-visible {
+  outline: 3px solid rgba(106, 27, 154, 0.25);
+  outline-offset: 2px;
+}
+
+/* Sections */
+.help-section { margin-top: 1.75rem; }
+
+.help-section h3 {
+  color: #2f2a3a;
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 .75rem 0;
+  padding-bottom: .5rem;
+  border-bottom: 1px solid #eee7f6;
+}
+
+/* Lists & text blocks */
+.help-list,
+.help-contact {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.help-list li,
+.help-contact li {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+  color: #333;
+}
+
+.help-card a {
+  color: #5c2d91;
+  text-decoration: underline;
+}
+
+/* Feedback form */
+.feedback-form { margin-top: 1rem; }
+
+.feedback-form textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 1rem;
+  border: 1px solid #d7c8ec;
+  border-radius: 10px;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 1rem;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.feedback-form textarea:focus {
+  border-color: #6a1b9a;
+  box-shadow: 0 0 0 4px rgba(106, 27, 154, 0.12);
+}
+
+.feedback-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: .9rem;
+}
+
+.feedback-form button {
+  padding: 0.7rem 1.5rem;
+  background-color: #5c2d91;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: filter .15s ease, transform .06s ease;
+}
+
+.feedback-form button:hover { filter: brightness(.97); }
+.feedback-form button:active { transform: translateY(1px); }
+
+.feedback-status {
+  font-size: 0.95rem;
+  color: #4b2376;
+  font-style: italic;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .help-card { padding: 1.75rem; }
+  .help-header { gap: 8px; }
+  .help-title { font-size: 1.6rem; }
+  .help-back { padding: 9px 12px; }
+}

@@ -1,0 +1,80 @@
+.ps-skel{
+  background:#f7f4ff;
+  border:1px solid #e7ddff;
+  border-radius:12px;
+  padding:14px;
+  color:#4b2376;
+}
+
+.ps-wrap{ display:flex; flex-direction:column; gap:12px; }
+
+.ps-alert{
+  background:#fdecea;
+  border:1px solid #f7c5c0;
+  color:#7a1f17;
+  padding:10px 12px;
+  border-radius:10px;
+}
+.ps-success{
+  background:#e9f7ef;
+  border:1px solid #bfe5cf;
+  color:#194a2c;
+  padding:10px 12px;
+  border-radius:10px;
+}
+
+.ps-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+@media (max-width: 900px){
+  .ps-grid{ grid-template-columns: 1fr; }
+}
+
+.ps-card{
+  background:#fff;
+  border:1px solid #e8ddff;
+  border-radius:12px;
+  padding:14px;
+  box-shadow:0 8px 20px rgba(75,35,118,.08);
+}
+.ps-card h4{ margin:0 0 12px 0; color:#2b2140; }
+
+.ps-field{ display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+.ps-field label{ font-weight:700; color:#2b2140; }
+.ps-field input,
+.ps-field textarea{
+  border:1px solid #dcd2ff;
+  border-radius:10px;
+  padding:10px 12px;
+  outline:none;
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.ps-field textarea{ resize: vertical; }
+.ps-field input:focus, .ps-field textarea:focus{
+  border-color:#5c2d91;
+  box-shadow:0 0 0 4px rgba(92,45,145,.15);
+}
+.read-only{
+  background:#fafafa;
+  color:#5a5a5a;
+}
+.muted{ color:#7b7197; }
+
+.ps-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+}
+
+.btn.btn-outline{
+  background:#fff;
+  border:1px solid #d8c7ff;
+  color:#45217e;
+}
+.btn.btn-outline:hover{
+  background:#f5f1ff;
+  border-color:#5c2d91;
+}
+

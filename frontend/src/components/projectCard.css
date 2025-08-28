@@ -15,10 +15,6 @@
   align-items: center;
 }
 
-.heart-icon {
-  cursor: pointer;
-  font-size: 18px;
-}
 
 .project-card p {
   margin: 8px 0;

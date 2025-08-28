@@ -46,7 +46,6 @@ const ProjectCard = ({
     <div className="project-card">
       <div className="project-header">
         <h4>{project.title}</h4>
-        <span className="heart-icon" title="Save">{'❤️'}</span>
       </div>
 
       <p><strong>Supervisor:</strong> {project.supervisor_name}</p>

@@ -1,4 +1,3 @@
-// Backend/middleware/submissionWindow.js
 const {
   getActiveCycle,
   isSubmissionOpen,
@@ -6,7 +5,7 @@ const {
 
 /**
  * Blocks write requests to preferences when the submission window is closed.
- * Also attaches the active cycle to req.cycle so controllers can use cycle_id.
+ * Attaches the active cycle to req.cycle so controllers can use cycle_id.
  */
 module.exports = async function submissionWindow(req, res, next) {
   try {
@@ -15,15 +14,15 @@ module.exports = async function submissionWindow(req, res, next) {
       return res.status(403).json({ message: 'No active allocation cycle.' });
     }
 
-    // expose the cycle to downstream controllers
+    // Attach active cycle to request
     req.cycle = cycle;
 
-    // only allow writes while the window is open
-    if (!isSubmissionOpen(cycle)) {
-      return res.status(403).json({ message: 'Submission window is closed.' });
+    // ✅ Allow if admin explicitly set status='open' OR within the date window
+    if (cycle.status === 'open' || isSubmissionOpen(cycle)) {
+      return next();
     }
 
-    next();
+    return res.status(403).json({ message: 'Submission window is closed.' });
   } catch (err) {
     console.error('submissionWindow error:', err);
     return res.status(500).json({ message: 'Submission window check failed' });
