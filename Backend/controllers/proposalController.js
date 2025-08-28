@@ -3,42 +3,87 @@ const db = require('../config/db');
 const path = require('path');
 const fs = require('fs');
 
-/** small helper to remove a file if we fail after upload */
+/* -------------------------------------------------------
+ * File helper
+ * ----------------------------------------------------- */
 function removeIfExists(filePathAbs) {
-  try { if (filePathAbs && fs.existsSync(filePathAbs)) fs.unlinkSync(filePathAbs); } catch (_) {}
+  try {
+    if (filePathAbs && fs.existsSync(filePathAbs)) fs.unlinkSync(filePathAbs);
+  } catch (_) {}
+}
+function absPathFromReqFile(file) {
+  if (!file?.path) return null;
+  return path.isAbsolute(file.path) ? file.path : path.join(process.cwd(), file.path);
 }
 
-/** active cycle helper */
+/* -------------------------------------------------------
+ * Constants
+ * ----------------------------------------------------- */
+const STUDENT_POOL_TOPIC = 'Student Proposal Ideas';
+
+/* -------------------------------------------------------
+ * Cycle helpers (prefer explicit -> active -> recent)
+ * ----------------------------------------------------- */
+async function getMostRecentCycleId() {
+  const [r] = await db.query(
+    `SELECT cycle_id FROM allocation_cycles ORDER BY submission_open_at DESC LIMIT 1`
+  );
+  return r.length ? r[0].cycle_id : null;
+}
 async function getActiveCycleId() {
-  // Prefer status flag
   const [byStatus] = await db.query(
-    `SELECT cycle_id
-       FROM allocation_cycles
+    `SELECT cycle_id FROM allocation_cycles
       WHERE status='open'
       ORDER BY submission_open_at DESC
       LIMIT 1`
   );
   if (byStatus.length) return byStatus[0].cycle_id;
 
-  // Fallback to date window
   const [byDate] = await db.query(
-    `SELECT cycle_id
-       FROM allocation_cycles
+    `SELECT cycle_id FROM allocation_cycles
       WHERE NOW() BETWEEN submission_open_at AND submission_close_at
       ORDER BY submission_open_at DESC
       LIMIT 1`
   );
   return byDate.length ? byDate[0].cycle_id : null;
 }
+async function cycleExists(cycleId) {
+  const [r] = await db.query(`SELECT 1 FROM allocation_cycles WHERE cycle_id=? LIMIT 1`, [cycleId]);
+  return !!r.length;
+}
+async function resolveCycleId(req) {
+  const raw = req.query?.cycle_id ?? req.body?.cycle_id ?? null;
+  if (raw != null && String(raw).trim() !== '') {
+    const cid = Number(raw);
+    if (!Number.isInteger(cid) || cid <= 0 || !(await cycleExists(cid))) {
+      const err = new Error('Invalid cycle');
+      err.status = 409;
+      throw err;
+    }
+    return cid;
+  }
+  const active = await getActiveCycleId();
+  if (active) return active;
+  const recent = await getMostRecentCycleId();
+  if (recent) return recent;
+  const err = new Error('No active cycle');
+  err.status = 409;
+  throw err;
+}
 
 /**
- * GET /proposals/supervisors/accepting-ideas
- * Returns supervisors who opted-in to accept student ideas AND still have seats left.
+ * GET /proposals/supervisors/accepting-ideas?cycle_id=#
+ * Return supervisors who have a student-idea pool with seats.
  */
-exports.listAcceptingSupervisors = async (_req, res) => {
+exports.listAcceptingSupervisors = async (req, res) => {
   try {
-    const cycleId = await getActiveCycleId();
-    if (!cycleId) return res.json([]);
+    let cycleId;
+    try {
+      cycleId = await resolveCycleId(req);
+    } catch (e) {
+      // If no cycle at all, return empty (UI can show “no cycle open”)
+      return res.json([]);
+    }
 
     const [rows] = await db.query(
       `
@@ -52,25 +97,30 @@ exports.listAcceptingSupervisors = async (_req, res) => {
       JOIN users u
         ON u.user_id = pool.supervisor_id
       LEFT JOIN (
-        -- Only count allocations that came from *student ideas* in this cycle
         SELECT a.supervisor_id, a.cycle_id, COUNT(*) AS cnt
         FROM allocations a
         JOIN proposals pr ON pr.proposal_id = a.proposal_id
-        WHERE a.status = 'allocated'
-          AND pr.project_id IS NULL     -- proposal not tied to a supervisor project
+        WHERE a.cycle_id = ?
+          AND a.status = 'allocated'
+          AND pr.project_id IS NULL
         GROUP BY a.supervisor_id, a.cycle_id
       ) AS taken
         ON taken.supervisor_id = pool.supervisor_id
        AND taken.cycle_id      = pool.cycle_id
       WHERE
-            pool.cycle_id        = ?
-        AND pool.is_archived     = 0
-        AND pool.approval_status = 'approved'
-        AND (pool.is_student_pool = 1 OR pool.topic = 'Student Proposal Ideas')
+            pool.cycle_id     = ?
+        AND pool.is_archived  = 0
+        AND pool.quota        > 0
+        -- IMPORTANT: do NOT require approval for student-idea pools
+        AND (
+              pool.is_student_pool = 1
+           OR  pool.topic = ?
+           OR  pool.topic LIKE CONCAT(?, ':%')
+        )
       HAVING seats_left > 0
       ORDER BY u.name
       `,
-      [cycleId]
+      [cycleId, cycleId, STUDENT_POOL_TOPIC, STUDENT_POOL_TOPIC]
     );
 
     res.json(rows);
@@ -80,41 +130,37 @@ exports.listAcceptingSupervisors = async (_req, res) => {
   }
 };
 
-
 /**
  * POST /proposals
  * Body (multipart/form-data):
  *  - title          (required)
  *  - description    (required)
- *  - supervisor_id  (required)
+ *  - supervisor_id  (required; users.user_id with role='supervisor')
  *  - file           (optional)
  *
- * Only allows supervisors who opted-in to accept student ideas this cycle.
- * Also stamps the proposal with the current cycle_id.
+ * Only allows supervisors who are accepting student ideas in the resolved cycle.
+ * Stamps the proposal with that cycle_id.
  */
 exports.submitProposal = async (req, res) => {
-  const studentId = req.user?.user_id; // from verifyToken middleware
+  const studentId = req.user?.user_id;
   const { supervisor_id, title, description } = req.body || {};
   const file = req.file || null;
 
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
   if (!title || !description || !supervisor_id) {
+    if (file) removeIfExists(absPathFromReqFile(file));
     return res.status(400).json({ message: 'Title, description, and supervisor are required.' });
   }
 
-  let absToRemove = null;
-  try {
-    // 0) active cycle
-    const cycleId = await getActiveCycleId();
-    if (!cycleId) {
-      if (req.file?.path) absToRemove = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
-      return res.status(409).json({ message: 'Submissions are closed (no active cycle).' });
-    }
+  let absToRemove = absPathFromReqFile(file);
 
-    // 1) Validate supervisor role
+  try {
+    const cycleId = await resolveCycleId(req); // throws if none/invalid
+
+    // Validate supervisor (users table with role='supervisor')
     const supId = Number(supervisor_id);
-    if (!Number.isInteger(supId)) {
-      if (req.file?.path) absToRemove = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
+    if (!Number.isInteger(supId) || supId <= 0) {
+      removeIfExists(absToRemove);
       return res.status(400).json({ message: 'Invalid supervisor id.' });
     }
 
@@ -125,13 +171,13 @@ exports.submitProposal = async (req, res) => {
         LIMIT 1`,
       [supId]
     );
-    if (supRows.length === 0) {
-      if (req.file?.path) absToRemove = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
+    if (!supRows.length) {
+      removeIfExists(absToRemove);
       return res.status(400).json({ message: 'Selected supervisor not found.' });
     }
     const supervisor = supRows[0];
 
-    // 2) Ensure this supervisor is accepting student ideas AND has seats left
+    // Ensure supervisor has a student-idea pool project with seats in this cycle
     const [poolRows] = await db.query(
       `
       SELECT 
@@ -140,99 +186,129 @@ exports.submitProposal = async (req, res) => {
         GREATEST(pool.quota - COALESCE(taken.cnt, 0), 0) AS seats_left
       FROM projects AS pool
       LEFT JOIN (
-        -- Count allocations from *student ideas* in this cycle
         SELECT a.supervisor_id, a.cycle_id, COUNT(*) AS cnt
         FROM allocations a
         JOIN proposals pr ON pr.proposal_id = a.proposal_id
-        WHERE a.status = 'allocated'
+        WHERE a.cycle_id = ?
+          AND a.status = 'allocated'
           AND pr.project_id IS NULL
         GROUP BY a.supervisor_id, a.cycle_id
       ) AS taken
         ON taken.supervisor_id = pool.supervisor_id
        AND taken.cycle_id      = pool.cycle_id
       WHERE
-            pool.cycle_id        = ?
-        AND pool.supervisor_id  = ?
-        AND pool.is_archived    = 0
-        AND pool.approval_status = 'approved'
-        AND (pool.is_student_pool = 1 OR pool.topic = 'Student Proposal Ideas')
+            pool.cycle_id       = ?
+        AND pool.supervisor_id = ?
+        AND pool.is_archived   = 0
+        AND pool.quota         > 0
+        AND (
+              pool.is_student_pool = 1
+           OR pool.topic = ?
+           OR pool.topic LIKE CONCAT(?, ':%')
+        )
       LIMIT 1
       `,
-      [cycleId, supId]
+      [cycleId, cycleId, supId, STUDENT_POOL_TOPIC, STUDENT_POOL_TOPIC]
     );
 
     if (!poolRows.length) {
-      if (req.file?.path) absToRemove = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
+      removeIfExists(absToRemove);
       return res.status(400).json({
         message: 'This supervisor is not accepting student proposals this cycle.',
       });
     }
     if ((poolRows[0].seats_left ?? 0) <= 0) {
-      if (req.file?.path) absToRemove = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
+      removeIfExists(absToRemove);
       return res.status(400).json({
         message: 'Supervisor’s student-idea quota is currently full.',
       });
     }
 
-    // 3) Insert proposal (topic_id is now NULL)
+    // Insert proposal (student-idea: project_id is NULL; topic_id NULL is fine)
     const storedFilename = file ? file.filename : null;
     const [result] = await db.query(
       `INSERT INTO proposals
-         (student_id, supervisor_id, cycle_id, topic_id, title, description, submitted_at, file_path)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
+         (student_id, supervisor_id, cycle_id, topic_id, title, description, submitted_at, file_path, status, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, 'pending', NULL)`,
       [studentId, supId, cycleId, null, title, description, storedFilename]
     );
+
+    // success: don’t attempt to clean file
+    absToRemove = null;
 
     return res.status(201).json({
       message: 'Proposal submitted successfully.',
       proposal_id: result.insertId,
       file_path: storedFilename,
       supervisor: { user_id: supervisor.user_id, name: supervisor.name, email: supervisor.email },
+      cycle_id: cycleId,
     });
   } catch (err) {
     console.error('Error submitting proposal:', err);
     if (absToRemove) removeIfExists(absToRemove);
-    else if (req.file?.path) {
-      const abs = path.isAbsolute(req.file.path) ? req.file.path : path.join(process.cwd(), req.file.path);
-      removeIfExists(abs);
-    }
-    return res.status(500).json({ message: 'Internal server error' });
+    return res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
   }
 };
 
 /**
  * GET /proposals (student’s own)
+ * Optional: ?cycle_id=#
  */
 exports.getProposalsByStudent = async (req, res) => {
-  const studentId = req.user?.user_id; // from auth middleware
+  const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
+  // If a cycle is provided, filter; otherwise show all
+  const raw = req.query?.cycle_id;
+  const hasCycle = raw != null && String(raw).trim() !== '';
+  const cycleId = hasCycle ? Number(raw) : null;
+
+  const baseSQL = `
+    SELECT
+      p.proposal_id   AS proposal_id,
+      p.title,
+      p.description,
+      p.submitted_at,
+      p.file_path,
+      p.supervisor_id,
+      u.name          AS supervisor_name,
+      u.email         AS supervisor_email,
+      p.status        AS status,
+      p.topic_id
+    FROM proposals p
+    LEFT JOIN users  u ON u.user_id  = p.supervisor_id
+    WHERE p.student_id = ?
+    ${hasCycle ? 'AND p.cycle_id = ?' : ''}
+    ORDER BY p.submitted_at DESC, p.proposal_id DESC
+  `;
+
   try {
-    const [rows] = await db.query(
-      `
-      SELECT
-        p.proposal_id   AS proposal_id,
-        p.title,
-        p.description,
-        p.submitted_at,
-        p.file_path,
-        p.supervisor_id,
-        u.name          AS supervisor_name,
-        u.email         AS supervisor_email,
-        p.status        AS status,
-        p.topic_id,
-        t.name          AS topic_name
-      FROM proposals p
-      LEFT JOIN users  u ON u.user_id  = p.supervisor_id
-      LEFT JOIN topics t ON t.topic_id = p.topic_id
-      WHERE p.student_id = ?
-      ORDER BY p.submitted_at DESC, p.proposal_id DESC
-      `,
-      [studentId]
+    // Try with topics join first (if table exists)
+    const sqlWithTopics = baseSQL.replace(
+      'FROM proposals p',
+      `FROM proposals p LEFT JOIN topics t ON t.topic_id = p.topic_id`
+    ).replace(
+      'p.topic_id',
+      'p.topic_id, t.name AS topic_name'
     );
 
+    const params = hasCycle ? [studentId, cycleId] : [studentId];
+    const [rows] = await db.query(sqlWithTopics, params);
     return res.json(rows || []);
   } catch (err) {
+    // If topics table is missing, fallback without it
+    if (err?.code === 'ER_NO_SUCH_TABLE') {
+      try {
+        const params = hasCycle ? [studentId, cycleId] : [studentId];
+        const [rows] = await db.query(baseSQL, params);
+        // add topic_name: null for compatibility
+        rows.forEach(r => { if (!('topic_name' in r)) r.topic_name = null; });
+        return res.json(rows || []);
+      } catch (e2) {
+        console.error('Error retrieving proposals (fallback):', e2);
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+    }
     console.error('Error retrieving proposals:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }

@@ -101,7 +101,7 @@ async function loadEligiblePreferences(conn, cycleId) {
       p.project_id,
       p.preference_order,
       p.contacted_supervisor,
-      p.submitted_at,
+      p.created_at AS submitted_at,     -- preferences uses created_at (no submitted_at)
       pr.supervisor_id,
       pr.quota,
       pr.spots_filled,
@@ -120,9 +120,9 @@ async function loadEligiblePreferences(conn, cycleId) {
 
 // capacities are CYCLE-SCOPED
 async function loadCapacities(conn, cycleId) {
-  // supervisor total quota (global per supervisor, adjust if you store per-cycle instead)
+  // Works whether the column is user_id or supervisor_id (users-only model)
   const [supQuotaRows] = await conn.query(
-    `SELECT supervisor_id, quota_total FROM supervisor_meta`
+    `SELECT COALESCE(user_id, supervisor_id) AS supervisor_id, quota_total FROM supervisor_meta`
   );
   const supervisorQuota = new Map(
     supQuotaRows.map(r => [r.supervisor_id, Number(r.quota_total || 0)])
@@ -293,6 +293,14 @@ exports.commit = async (req, res) => {
         ]
       );
 
+      // keep spots_filled in sync
+      await conn.query(
+        `UPDATE projects
+           SET spots_filled = LEAST(spots_filled + 1, quota)
+         WHERE project_id = ?`,
+        [a.project_id]
+      );
+
       inserted++;
     }
 
@@ -309,25 +317,32 @@ exports.commit = async (req, res) => {
   }
 };
 
-// ---------------- Manual allocate (existing flow, kept) ----------------
+// ---------------- Manual allocate (updated: cycle-aware) ----------------
 exports.allocate = async (req, res) => {
   const supervisorId = req.user.user_id;
-  const { project_id, student_id } = req.body;
+  const { project_id, student_id, cycle_id } = req.body;
 
   if (!project_id || !student_id) {
     return res.status(400).json({ message: 'project_id and student_id are required' });
   }
 
-  const conn = await db.getConnection();
+  let conn;
   try {
+    // respect provided cycle_id; else resolve
+    const { cycleId } = cycle_id
+      ? { cycleId: Number(cycle_id) }
+      : await resolveCycleId(req);
+
+    conn = await db.getConnection();
     await conn.beginTransaction();
 
+    // prevent dup in this cycle
     const [existsStudent] = await conn.query(
-      `SELECT 1 FROM allocations WHERE student_id = ? FOR UPDATE`,
-      [student_id]
+      `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
+      [student_id, cycleId]
     );
     if (existsStudent.length) {
-      throw new Error('Student already allocated to a project');
+      throw new Error('Student already allocated to a project for this cycle');
     }
 
     const [rows] = await conn.query(
@@ -347,21 +362,21 @@ exports.allocate = async (req, res) => {
     if (upd.affectedRows === 0) throw new Error('Project quota is full');
 
     await conn.query(
-      `INSERT INTO allocations (project_id, student_id, supervisor_id, status)
-       VALUES (?, ?, ?, 'allocated')`,
-      [project_id, student_id, supervisorId]
+      `INSERT INTO allocations (project_id, student_id, supervisor_id, status, allocated_at, cycle_id)
+       VALUES (?, ?, ?, 'allocated', NOW(), ?)`,
+      [project_id, student_id, supervisorId, cycleId]
     );
 
     await conn.commit();
-    return res.status(201).json({ message: 'Student allocated successfully' });
+    return res.status(201).json({ message: 'Student allocated successfully', cycle_id: cycleId });
   } catch (err) {
-    await conn.rollback();
+    if (conn) try { await conn.rollback(); } catch {}
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Student already allocated' });
     }
     return res.status(400).json({ message: err.message || 'Allocation failed' });
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 };
 
@@ -398,7 +413,7 @@ exports.deallocate = async (req, res) => {
   }
 };
 
-// ---------------- Accept a Student-Idea Proposal (UPDATED) ----------------
+// ---------------- Accept a Student-Idea Proposal (users-only; cycle-aware) ----------------
 exports.acceptStudentIdea = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { proposal_id } = req.body;
@@ -412,19 +427,19 @@ exports.acceptStudentIdea = async (req, res) => {
 
     const { cycleId } = await resolveCycleId(req);
 
-    // 1) Lock proposal (must be student-idea for this supervisor & cycle)
+    // 1) Lock proposal (do not require proposals.cycle_id column)
     const [propRows] = await conn.query(
       `
       SELECT p.proposal_id, p.student_id, p.supervisor_id, p.project_id, p.status
       FROM proposals p
-      WHERE p.proposal_id = ? AND p.supervisor_id = ? AND p.cycle_id = ?
+      WHERE p.proposal_id = ? AND p.supervisor_id = ?
       FOR UPDATE
       `,
-      [proposal_id, supervisorId, cycleId]
+      [proposal_id, supervisorId]
     );
     if (!propRows.length) {
       await conn.rollback();
-      return res.status(404).json({ message: 'Proposal not found for this cycle/supervisor.' });
+      return res.status(404).json({ message: 'Proposal not found for this supervisor.' });
     }
     const pr = propRows[0];
     if (pr.project_id) {
@@ -436,7 +451,7 @@ exports.acceptStudentIdea = async (req, res) => {
       return res.status(400).json({ message: 'Already allocated.' });
     }
 
-    // 2) Lock supervisor's student-idea pool row
+    // 2) Lock supervisor's student-idea pool row for this cycle
     const [poolRows] = await conn.query(
       `
       SELECT 

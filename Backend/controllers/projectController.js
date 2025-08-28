@@ -7,7 +7,8 @@ const db = require('../config/db');
 const STUDENT_IDEA_TOPIC_NAME = 'Student Proposal Ideas';
 
 const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
-const isStudentIdeaTopic = (topic) => normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
+const isStudentIdeaTopic = (topic) =>
+  normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
 
 async function getActiveCycleId() {
   const [byStatus] = await db.query(`
@@ -34,8 +35,8 @@ const parseBool = (v, def = false) => {
 };
 
 /* -------------------------------------------
-   Public browse columns/joins (correct mapping)
-   - projects.supervisor_id stores a users.user_id
+   Public browse columns/joins
+   - projects.supervisor_id -> users.user_id
 -------------------------------------------- */
 const baseColumns = `
   p.project_id,
@@ -54,18 +55,13 @@ const baseColumns = `
   p.updated_at,
   p.is_archived,
 
-  -- identities
-  u.user_id AS supervisor_user_id,
-  s.supervisor_id AS supervisor_profile_id,
-
-  -- name + email with sensible fallbacks
-  COALESCE(s.name, p.supervisor_name) AS supervisor_name,
-  COALESCE(u.email, s.email)          AS supervisor_email
+  u.user_id AS supervisor_id,
+  COALESCE(u.name, p.supervisor_name)  AS supervisor_name,
+  u.email  AS supervisor_email
 `;
 
 const baseJoins = `
-  LEFT JOIN users u       ON u.user_id       = p.supervisor_id
-  LEFT JOIN supervisors s ON s.user_id       = u.user_id
+  LEFT JOIN users u ON u.user_id = p.supervisor_id
 `;
 
 /* ========================================================
@@ -128,7 +124,7 @@ exports.filterBySupervisor = async (req, res) => {
       FROM projects p
       ${baseJoins}
       WHERE p.is_archived = 0
-        AND LOWER(TRIM(COALESCE(s.name, p.supervisor_name))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(u.name, p.supervisor_name))) = LOWER(TRIM(?))
       ORDER BY p.created_at DESC, p.project_id DESC
       `,
       [supervisor]
@@ -193,7 +189,9 @@ exports.multiFilteredProjects = async (req, res) => {
   const params = [];
 
   if (supervisor && supervisor.trim()) {
-    clauses.push('LOWER(TRIM(COALESCE(s.name, p.supervisor_name))) LIKE LOWER(TRIM(?))');
+    clauses.push(
+      'LOWER(TRIM(COALESCE(u.name, p.supervisor_name))) LIKE LOWER(TRIM(?))'
+    );
     params.push(`%${supervisor}%`);
   }
   if (topic && topic.trim()) {
@@ -236,7 +234,7 @@ exports.searchProjects = async (req, res) => {
     const fields = [
       'p.title',
       'p.description',
-      'COALESCE(s.name, p.supervisor_name)',
+      'COALESCE(u.name, p.supervisor_name)',
       'p.topic',
       'p.keywords',
     ];
@@ -323,7 +321,8 @@ exports.getMyProjectById = async (req, res) => {
   const { projectId } = req.params;
   const id = Number(projectId);
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid projectId' });
+  if (!Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ message: 'Invalid projectId' });
 
   try {
     const [[own]] = await db.query(
@@ -342,7 +341,8 @@ exports.getMyProjectById = async (req, res) => {
         d.full_description, d.prerequisites
       FROM projects p
       LEFT JOIN project_details d ON d.project_id = p.project_id
-      WHERE p.project_id = ?`,
+      WHERE p.project_id = ?
+      `,
       [id]
     );
 
@@ -358,7 +358,8 @@ exports.updateMyProject = async (req, res) => {
   const { projectId } = req.params;
   const id = Number(projectId);
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid projectId' });
+  if (!Number.isInteger(id) || id <= 0)
+    return res.status(400).json({ message: 'Invalid projectId' });
 
   const {
     title,
@@ -368,6 +369,7 @@ exports.updateMyProject = async (req, res) => {
     quota,
     full_description = null,
     prerequisites = null,
+    cycle_id: cycleIdFromBody = null, // allow overriding cycle
   } = req.body || {};
 
   const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -379,23 +381,37 @@ exports.updateMyProject = async (req, res) => {
     return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
   }
 
-  const studentPool = isStudentIdeaTopic(topic);
-  const cycleId = studentPool ? await getActiveCycleId() : null;
-  if (studentPool && !cycleId) {
-    return res.status(409).json({ message: 'No active allocation cycle.' });
-  }
-
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
+    // Ownership + current cycle
     const [[own]] = await conn.query(
-      `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
+      `SELECT project_id, cycle_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
       [id, supervisorId]
     );
     if (!own) {
       await conn.rollback();
       return res.status(404).json({ message: 'Project not found or not yours' });
+    }
+
+    const studentPool = isStudentIdeaTopic(topic);
+    let cycleId;
+    if (cycleIdFromBody !== null && cycleIdFromBody !== undefined) {
+      cycleId = Number(cycleIdFromBody);
+      if (!Number.isInteger(cycleId) || cycleId <= 0) {
+        await conn.rollback();
+        return res.status(400).json({ message: 'Invalid cycle_id' });
+      }
+    } else if (studentPool) {
+      cycleId = await getActiveCycleId();
+      if (!cycleId) {
+        await conn.rollback();
+        return res.status(409).json({ message: 'No active allocation cycle.' });
+      }
+    } else {
+      // keep existing if not provided
+      cycleId = own.cycle_id;
     }
 
     await conn.query(
@@ -411,7 +427,7 @@ exports.updateMyProject = async (req, res) => {
         q,
         studentPool ? 1 : 0,
         cycleId,
-        id
+        id,
       ]
     );
 
@@ -467,6 +483,7 @@ exports.createProject = async (req, res) => {
       quota,
       full_description = null,
       prerequisites = null,
+      cycle_id: cycleIdFromBody = null,   // allow explicit cycle
     } = req.body || {};
 
     const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -479,14 +496,20 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
     }
 
-    const supervisor_id = req.user.user_id; // projects.supervisor_id stores users.user_id
+    // Decide cycle_id for ALL projects (not only student-pool)
+    let cycleId = cycleIdFromBody ? Number(cycleIdFromBody) : null;
+    if (!cycleId) {
+      cycleId = await getActiveCycleId();
+    }
+    if (!cycleId) {
+      return res.status(409).json({ message: 'No active allocation cycle. Open a cycle or pass cycle_id.' });
+    }
+
+    // users-only: supervisor is the logged-in user
+    const supervisor_id   = req.user.user_id;
     const supervisor_name = req.user.name || '';
 
-    const studentPool = isStudentIdeaTopic(topic);
-    const cycleId = studentPool ? await getActiveCycleId() : null;
-    if (studentPool && !cycleId) {
-      return res.status(409).json({ message: 'No active allocation cycle.' });
-    }
+    const isStudentPool = isStudentIdeaTopic(topic);
 
     const conn = await db.getConnection();
     try {
@@ -508,8 +531,8 @@ exports.createProject = async (req, res) => {
           topic ? String(topic).trim() : null,
           keywords ? String(keywords).trim() : null,
           q,
-          supervisor_id,
-          studentPool ? 1 : 0,
+          supervisor_id,                 // users.user_id
+          isStudentPool ? 1 : 0,
           cycleId,
         ]
       );
@@ -518,7 +541,10 @@ exports.createProject = async (req, res) => {
 
       await conn.query(
         `INSERT INTO project_details (project_id, full_description, prerequisites)
-         VALUES (?, ?, ?)`,
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           full_description = VALUES(full_description),
+           prerequisites    = VALUES(prerequisites)`,
         [
           project_id,
           full_description ? String(full_description).trim() : null,
@@ -624,6 +650,7 @@ exports.deleteMyProject = async (req, res) => {
   try {
     await conn.beginTransaction();
 
+    // Ownership check
     const [[own]] = await conn.query(
       `SELECT project_id FROM projects WHERE project_id = ? AND supervisor_id = ?`,
       [id, supervisorId]
@@ -633,6 +660,7 @@ exports.deleteMyProject = async (req, res) => {
       return res.status(404).json({ message: 'Project not found or not yours' });
     }
 
+    // Block if there are allocations
     const [[alloc]] = await conn.query(
       `SELECT COUNT(*) AS c FROM allocations WHERE project_id = ?`,
       [id]
@@ -642,8 +670,11 @@ exports.deleteMyProject = async (req, res) => {
       return res.status(409).json({ message: 'Cannot delete: project has allocated students' });
     }
 
-    await conn.query(`DELETE FROM project_details WHERE project_id = ?`, [id]);
+    // Clean up dependent rows first
+    await conn.query(`DELETE FROM preferences      WHERE project_id = ?`, [id]);
+    await conn.query(`DELETE FROM project_details  WHERE project_id = ?`, [id]);
 
+    // Finally delete the project
     const [del] = await conn.query(
       `DELETE FROM projects WHERE project_id = ? AND supervisor_id = ?`,
       [id, supervisorId]

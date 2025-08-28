@@ -4,8 +4,10 @@ const { toSqlDate } = require('../utils/dateUtil');
 
 /* ---------------- Helpers ---------------- */
 function secondsBetween(a, b) {
+  if (!a || !b) return 0;
   const A = new Date(a).getTime();
   const B = new Date(b).getTime();
+  if (Number.isNaN(A) || Number.isNaN(B)) return 0;
   return Math.max(0, Math.floor((B - A) / 1000));
 }
 function toSqlOrNull(v) {
@@ -18,7 +20,7 @@ function toSqlOrNull(v) {
 function assertValidStatus(status) {
   if (
     status !== undefined &&
-    !['draft', 'open', 'closed', 'archived'].includes(String(status))
+    !['draft', 'open', 'closed', 'committed'].includes(String(status))
   ) {
     const err = new Error('Invalid status');
     err.status = 400;
@@ -42,19 +44,17 @@ exports.getStatus = async (_req, res) => {
     const cycle = rows[0];
     const now = new Date();
 
-    const isSubmissionOpen =
-      cycle.status === 'open' && now < new Date(cycle.submission_close_at);
-    const hasPassedDeadline = now >= new Date(cycle.submission_close_at);
+    const closeAt = cycle.submission_close_at ? new Date(cycle.submission_close_at) : null;
+    const isSubmissionOpen = cycle.status === 'open' && closeAt && now < closeAt;
+    const hasPassedDeadline = !!closeAt && now >= closeAt;
 
     res.json({
       hasActiveCycle: true,
       cycle,
       isSubmissionOpen,
       hasPassedDeadline,
-      secondsUntilClose: secondsBetween(now, cycle.submission_close_at),
-      secondsUntilCommit: cycle.commit_at
-        ? secondsBetween(now, cycle.commit_at)
-        : 0,
+      secondsUntilClose: closeAt ? secondsBetween(now, closeAt) : 0,
+      secondsUntilCommit: cycle.commit_at ? secondsBetween(now, cycle.commit_at) : 0,
       canCommitNow: !!cycle.commit_at && now >= new Date(cycle.commit_at),
     });
   } catch (e) {
@@ -104,14 +104,10 @@ exports.create = async (req, res) => {
     if (sqlClose <= sqlOpen)
       return res.status(400).json({ message: 'Close must be after open' });
     if (sqlCommit && sqlCommit < sqlClose)
-      return res
-        .status(400)
-        .json({ message: 'Commit must be on/after close' });
+      return res.status(400).json({ message: 'Commit must be on/after close' });
 
     if (status === 'open') {
-      await db.query(
-        `UPDATE allocation_cycles SET status='closed' WHERE status='open'`
-      );
+      await db.query(`UPDATE allocation_cycles SET status='closed' WHERE status='open'`);
     }
 
     const [ins] = await db.query(
@@ -127,9 +123,7 @@ exports.create = async (req, res) => {
     res.status(201).json(row);
   } catch (e) {
     console.error('create cycle error:', e);
-    res
-      .status(e.status || 500)
-      .json({ message: e.message || 'Failed to create cycle' });
+    res.status(e.status || 500).json({ message: e.message || 'Failed to create cycle' });
   }
 };
 
@@ -158,39 +152,20 @@ exports.update = async (req, res) => {
     const sqlCommit = toSqlOrNull(commit_at);
 
     const nextOpen = sqlOpen !== undefined ? sqlOpen : current.submission_open_at;
-    const nextClose =
-      sqlClose !== undefined ? sqlClose : current.submission_close_at;
+    const nextClose = sqlClose !== undefined ? sqlClose : current.submission_close_at;
     const nextCommit = sqlCommit !== undefined ? sqlCommit : current.commit_at;
 
     if (nextClose <= nextOpen)
       return res.status(400).json({ message: 'Close must be after open' });
     if (nextCommit && nextCommit < nextClose)
-      return res
-        .status(400)
-        .json({ message: 'Commit must be on/after close' });
+      return res.status(400).json({ message: 'Commit must be on/after close' });
 
-    const fields = [],
-      vals = [];
-    if (name !== undefined) {
-      fields.push('name=?');
-      vals.push(name);
-    }
-    if (sqlOpen !== undefined) {
-      fields.push('submission_open_at=?');
-      vals.push(sqlOpen);
-    }
-    if (sqlClose !== undefined) {
-      fields.push('submission_close_at=?');
-      vals.push(sqlClose);
-    }
-    if (sqlCommit !== undefined) {
-      fields.push('commit_at=?');
-      vals.push(sqlCommit);
-    }
-    if (status !== undefined) {
-      fields.push('status=?');
-      vals.push(status);
-    }
+    const fields = [], vals = [];
+    if (name !== undefined) { fields.push('name=?'); vals.push(name); }
+    if (sqlOpen !== undefined) { fields.push('submission_open_at=?'); vals.push(sqlOpen); }
+    if (sqlClose !== undefined) { fields.push('submission_close_at=?'); vals.push(sqlClose); }
+    if (sqlCommit !== undefined) { fields.push('commit_at=?'); vals.push(sqlCommit); }
+    if (status !== undefined) { fields.push('status=?'); vals.push(status); }
 
     if (!fields.length)
       return res.status(400).json({ message: 'No fields to update' });
@@ -215,9 +190,7 @@ exports.update = async (req, res) => {
     res.json(row);
   } catch (e) {
     console.error('update cycle error:', e);
-    res
-      .status(e.status || 500)
-      .json({ message: e.message || 'Failed to update cycle' });
+    res.status(e.status || 500).json({ message: e.message || 'Failed to update cycle' });
   }
 };
 
@@ -245,7 +218,7 @@ exports.openNow = async (req, res) => {
       [id]
     );
 
-    // 3) find most recent previous cycle (if any)
+    // 3) most recent previous cycle
     const [prevRows] = await conn.query(
       `SELECT cycle_id
          FROM allocation_cycles
@@ -258,8 +231,7 @@ exports.openNow = async (req, res) => {
     if (prevRows.length) {
       const prevId = prevRows[0].cycle_id;
 
-      // 4) Seed approved, non-archived projects from previous cycle into the new one.
-      // Avoid duplicates in target cycle by (supervisor_id, title).
+      // 4) seed approved, non-archived projects from previous cycle
       await conn.query(
         `
         INSERT INTO projects (
@@ -334,7 +306,7 @@ exports.commitNow = async (req, res) => {
   try {
     const { id } = req.params;
     await db.query(
-      `UPDATE allocation_cycles SET commit_at=NOW() WHERE cycle_id=?`,
+      `UPDATE allocation_cycles SET commit_at=NOW(), status='committed' WHERE cycle_id=?`,
       [id]
     );
     res.json({ message: 'Commit time set to now' });
@@ -344,28 +316,28 @@ exports.commitNow = async (req, res) => {
   }
 };
 
-/* --------- Archive (safe) & Delete (including force) ---------- */
+/* --------- Archive (mapped to closed) & Delete (force-aware) ---------- */
 
-// PATCH /cycle/:id/archive
+// PATCH /cycle/:id/archive  (since status doesn't support 'archived', map to 'closed')
 exports.archive = async (req, res) => {
   try {
     const { id } = req.params;
     const [upd] = await db.query(
       `UPDATE allocation_cycles
-         SET status='archived', archived_at = NOW()
+         SET status='closed'
        WHERE cycle_id = ?`,
       [id]
     );
     if (!upd.affectedRows)
       return res.status(404).json({ message: 'Cycle not found' });
-    res.json({ message: 'Cycle archived' });
+    res.json({ message: 'Cycle archived (set to closed)' });
   } catch (e) {
     console.error('archive cycle error:', e);
     res.status(500).json({ message: 'Failed to archive cycle' });
   }
 };
 
-// DELETE /cycle/:id  (use ?force=1 to delete even with allocations)
+// DELETE /cycle/:id  (use ?force=1 to delete even with allocations/projects)
 exports.remove = async (req, res) => {
   let conn;
   try {
@@ -382,12 +354,16 @@ exports.remove = async (req, res) => {
       `SELECT COUNT(*) AS c FROM allocations WHERE cycle_id=?`,
       [id]
     );
+    const [[projs]] = await db.query(
+      `SELECT COUNT(*) AS c FROM projects WHERE cycle_id=?`,
+      [id]
+    );
 
-    // If there are allocations and not forcing, block
-    if (allocs.c > 0 && !force) {
+    if ((allocs.c > 0 || projs.c > 0) && !force) {
       return res.status(400).json({
         message:
-          'Cannot delete cycle with existing allocations. Pass ?force=1 to delete and remove related data.',
+          `Cannot delete cycle with existing data (allocations=${allocs.c}, projects=${projs.c}). ` +
+          `Pass ?force=1 to delete and remove related data.`,
       });
     }
 
@@ -395,24 +371,18 @@ exports.remove = async (req, res) => {
     await conn.beginTransaction();
 
     if (allocs.c > 0) {
-      // Purge allocations belonging to this cycle
       await conn.query(`DELETE FROM allocations WHERE cycle_id = ?`, [id]);
     }
 
-    // Detach any student idea pool projects tied to this cycle
-    await conn.query(
-      `UPDATE projects
-          SET is_student_pool = 0,
-              cycle_id        = NULL
-        WHERE cycle_id = ?`,
-      [id]
-    );
+    if (projs.c > 0) {
+      // Will cascade to project_details; allocations.project_id is ON DELETE SET NULL; preferences has ON DELETE CASCADE
+      await conn.query(`DELETE FROM projects WHERE cycle_id = ?`, [id]);
+    }
 
-    // Finally delete the cycle
     await conn.query(`DELETE FROM allocation_cycles WHERE cycle_id = ?`, [id]);
 
     await conn.commit();
-    res.json({ message: 'Cycle deleted', cycle_id: id, forced: allocs.c > 0 });
+    res.json({ message: 'Cycle deleted', cycle_id: id, forced: allocs.c > 0 || projs.c > 0 });
   } catch (e) {
     if (conn) try { await conn.rollback(); } catch {}
     console.error('delete cycle error:', e);

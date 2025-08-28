@@ -58,9 +58,9 @@
 /* ===== Profile + Dropdown ===== */
 .profile-container{ position:relative; display:inline-block; }
 .profile-icon{
-  display:flex; align-items:center; gap:6px;
+  display:flex; align-items:center; gap:10px;   /* bigger gap for larger caret */
   background:#e2d7fb; color:#341b55;
-  padding:8px 12px;
+  padding:9px 16px;                              /* slightly larger pill */
   border-radius:20px;
   font-size:18px;
   cursor:pointer;
@@ -70,7 +70,15 @@
 .profile-icon:hover{ background:#d9cdf7; }
 .profile-icon:active{ transform:translateY(1px); }
 .profile-icon:focus-visible{ outline:3px solid rgba(255,255,255,.6); outline-offset:2px; }
-.caret{ font-size:10px; line-height:1; }
+
+/* Bigger caret */
+.caret{
+  font-size:20px;                                /* bumped from 16px */
+  line-height:1;
+  transform: translateY(1px);
+}
+/* If your caret is an SVG/icon */
+.caret svg{ width:20px; height:20px; display:block; }
 
 /* Dropdown box */
 .profile-dropdown{
@@ -110,12 +118,12 @@
 .profile-dropdown button:focus-visible,
 .profile-dropdown .menu-item:focus-visible{ outline:3px solid rgba(92,45,145,.35); }
 
-/* Little arrow pointer */
+/* Bigger little arrow pointer */
 .profile-dropdown::before{
   content:"";
   position:absolute;
-  top:-8px; right:16px;
-  border-width:0 8px 8px 8px;
+  top:-14px; right:16px;                          /* was -12px */
+  border-width:0 14px 14px 14px;                  /* was 0 12px 12px 12px */
   border-style:solid;
   border-color:transparent transparent #fff transparent;
   filter:drop-shadow(0 -2px 2px rgba(0,0,0,.08));
@@ -151,4 +159,6 @@
 @media (max-width: 520px){
   .portal-title{ display:none; }
   .search-section input{ width:150px; }
+  .caret{ font-size:16px; transform: translateY(1px); }  /* scale down on very small screens */
+  .caret svg{ width:16px; height:16px; }
 }

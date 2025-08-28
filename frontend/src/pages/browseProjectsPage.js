@@ -1,5 +1,5 @@
 // src/pages/BrowseProjectsPage.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FilterBar from '../components/filterBar';
 import ProjectCard from '../components/projectCard';
@@ -16,13 +16,16 @@ const isIdeaPoolProject = (p) =>
   (typeof p?.topic === 'string' &&
     p.topic.trim().toLowerCase() === 'student proposal ideas');
 
+// de-dupe by project_id
+const uniqueById = (arr) =>
+  Array.from(new Map((arr || []).map(p => [p.project_id, p])).values());
+
 export default function BrowseProjectsPage() {
   const [filters, setFilters] = useState({ supervisor: '', topic: '', keyword: '' });
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
 
-  // message shown above grid (used when empty)
   const [emptyMsg, setEmptyMsg] = useState('');
   const [suggestions, setSuggestions] = useState([]);
 
@@ -31,24 +34,9 @@ export default function BrowseProjectsPage() {
   const [prefCount, setPrefCount] = useState(0);
 
   const navigate = useNavigate();
+  const didInit = useRef(false); // prevent double-run in React StrictMode
 
-  const primeAddedPrefs = useCallback(async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      const res = await fetch(`${API}/preferences`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const idsSet = new Set((data || []).map(p => p.project_id));
-      const idMap  = new Map((data || []).map(p => [p.project_id, p.preference_id]));
-      setAddedPrefs(idsSet);
-      setPrefIdByProject(idMap);
-      setPrefCount(idsSet.size);
-    } catch {/* ignore */}
-  }, []);
-
+  // ------------- helpers ----------------
   const buildFilterQS = (f) => {
     const qs = new URLSearchParams();
     if (f.supervisor?.trim()) qs.set('supervisor', f.supervisor.trim());
@@ -61,13 +49,36 @@ export default function BrowseProjectsPage() {
   const hasAnyFilter = (f) =>
     Boolean(f.supervisor?.trim() || f.topic?.trim() || f.keyword?.trim());
 
+  // ------------- preferences -------------
+  const primeAddedPrefs = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const res = await fetch(`${API}/preferences`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.preferences || []);
+      const idsSet = new Set(list.map(p => p.project_id));
+      const idMap  = new Map(list.map(p => [p.project_id, p.preference_id]));
+      setAddedPrefs(idsSet);
+      setPrefIdByProject(idMap);
+      setPrefCount(idsSet.size);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // ------------- fetchers ----------------
   const fetchAllProjects = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`${API}/projects`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load projects');
-      setProjects(Array.isArray(data) ? data : (data.projects || []));
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(uniqueById(list));
       setEmptyMsg('');
       setSuggestions([]);
     } catch (err) {
@@ -90,11 +101,8 @@ export default function BrowseProjectsPage() {
       const res = await fetch(`${API}/projects/filters${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to fetch filtered projects');
-
       const list = Array.isArray(data) ? data : (data.projects || []);
-      setProjects(list);
-
-      // show empty state with link if none
+      setProjects(uniqueById(list));
       setEmptyMsg(list.length ? '' : 'No projects match your filters.');
       setSuggestions([]);
     } catch (err) {
@@ -108,24 +116,18 @@ export default function BrowseProjectsPage() {
 
   const handleGlobalSearch = useCallback(async (rawTerm) => {
     const term = (rawTerm || '').trim();
-
-    // Empty search => show everything
     if (!term) {
       await fetchAllProjects();
       return;
     }
-
     setLoading(true);
     try {
       const qs = new URLSearchParams({ query: term }).toString();
       const res = await fetch(`${API}/projects/search?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Search failed');
-
       const list = Array.isArray(data) ? data : (data.projects || []);
-      setProjects(list);
-
-      // Do NOT auto-restore; show the empty state with “Show all projects”
+      setProjects(uniqueById(list));
       setEmptyMsg(list.length ? '' : 'No matches found.');
       setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
     } catch (err) {
@@ -138,6 +140,7 @@ export default function BrowseProjectsPage() {
     }
   }, [fetchAllProjects]);
 
+  // ------------- actions -----------------
   const handleViewDetails = async (projectId) => {
     try {
       const res = await fetch(`${API}/projects/details/${projectId}`);
@@ -220,10 +223,14 @@ export default function BrowseProjectsPage() {
   };
 
   const handleSubmitIdea = (project) => {
+    // supervisor_id comes from users.user_id in the backend now
     navigate(`/submit-proposal?sup=${project.supervisor_id}`);
   };
 
+  // ------------- lifecycle ----------------
   useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
     fetchAllProjects();
     primeAddedPrefs();
   }, [fetchAllProjects, primeAddedPrefs]);
@@ -238,14 +245,17 @@ export default function BrowseProjectsPage() {
     fetchAllProjects();
   };
 
-  // Link action to restore list
-  const showAll = async () => {
+  const showAll = useCallback(async () => {
     setFilters({ supervisor: '', topic: '', keyword: '' });
     setEmptyMsg('');
     setSuggestions([]);
     await fetchAllProjects();
-  };
+  }, [fetchAllProjects]);
 
+  // Final guard: even if backend somehow returns dup ids, render unique set
+  const renderList = useMemo(() => uniqueById(projects), [projects]);
+
+  // ------------- render -------------------
   return (
     <>
       <HeaderBar onSearch={handleGlobalSearch} onClear={fetchAllProjects} />
@@ -271,8 +281,7 @@ export default function BrowseProjectsPage() {
             </div>
           </div>
 
-          {/* Empty state message with a link to show all */}
-          {!loading && projects.length === 0 ? (
+          {!loading && renderList.length === 0 ? (
             <div className="search-feedback" role="status">
               {emptyMsg || 'No projects found.'}{' '}
               <button className="suggestion-chip" onClick={showAll}>
@@ -295,7 +304,7 @@ export default function BrowseProjectsPage() {
             <p>Loading projects...</p>
           ) : (
             <div className="project-grid">
-              {projects.map(project => {
+              {renderList.map(project => {
                 const ideaPool = isIdeaPoolProject(project);
                 return (
                   <ProjectCard
