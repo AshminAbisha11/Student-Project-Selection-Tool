@@ -2,3 +2,36 @@ body {
   margin: 0;
   font-family: Arial, sans-serif;
 }
+
+html, body, #root { height: 100%; }
+body { margin: 0; padding: 0; }
+* { box-sizing: border-box; }
+
+
+:root{
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
+  --font-display: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Optional tuning */
+  --text-color: #2b2140;
+  --muted-color: #6c5a87;
+}
+
+html, body {
+  font-family: var(--font-body);
+  color: var(--text-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headings use display font */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: .2px;
+}
+
+/* Muted helper */
+.muted { color: var(--muted-color); }
+

@@ -1,62 +1,127 @@
-/* full-width bar visuals */
+/* ==============================
+   Layout variables (defaults)
+   ============================== */
+:root{
+  --sidebar-w: 280px;   /* fallback when no inline/custom value is provided */
+  --header-h: 64px;     /* header height */
+}
+
+/* If your sidebar file sets an inline custom prop (e.g. style={{'--sidebar-w':'280px'}}),
+   that value will override the fallback above automatically.               */
+
+
+/* ==============================
+   Header: fixed and aligned to sidebar
+   ============================== */
 .sv-header{
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-w, 280px);
+  width: calc(100vw - var(--sidebar-w, 280px));
+  height: var(--header-h);
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0 24px;
+  box-sizing: border-box;
+
+  color: #fff;
   background: linear-gradient(90deg,#5c2d91,#5c2d91 28%, #4a34b0 70%);
-  color:#fff;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  width:100%;
-  height:64px;
-  border-radius:0;                 /* keep edge-to-edge */
-  padding:0 32px;                  /* aligns with grid gutters */
-  box-sizing:border-box;
 }
 
-/* left section with logo + title */
+/* Left area (logo + title) */
 .sv-header__left{
-  display:flex;
-  align-items:center;
-  gap:12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
-
 .sv-header__logo{
-  height:28px;                     /* tweak to your asset */
-  width:auto;
-  display:block;
+  height: 28px;
+  width: auto;
+  display: block;
 }
-
 .sv-header__title{
-  margin:0;
-  font-size:18px;
-  font-weight:800;
-  letter-spacing:.2px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* right controls */
+/* Right area (search + profile) */
 .sv-header__right{
-  display:flex;
-  align-items:center;
-  gap:8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sv-search-wrap{
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sv-search{
-  background:#fff;
-  border:none;
-  outline:none;
-  border-radius:999px;
-  padding:8px 14px;
-  min-width:240px;
+  background: #fff;
+  border: none;
+  outline: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  min-width: 240px;
+  flex: 1 1 auto;
 }
 
 .sv-search-btn,
 .sv-profile-btn{
-  background:#e6d6fa;
-  border:none;
-  border-radius:999px;
-  height:36px;
-  width:36px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  cursor:pointer;
+  background: #e6d6fa;
+  border: none;
+  border-radius: 999px;
+  height: 36px;
+  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* ==============================
+   Main content helper
+   - Keeps content clear of the fixed header and aligned with sidebar
+   ============================== */
+.sv-main{
+  margin-left: var(--sidebar-w, 280px);
+  padding-top: var(--header-h);
+  box-sizing: border-box;
+}
+
+/* ==============================
+   Responsive: when sidebar collapses (if you do)
+   ============================== */
+@media (max-width: 880px){
+  .sv-header{
+    left: 0;
+    width: 100vw;
+  }
+  .sv-main{
+    margin-left: 0;
+  }
+}
+
+.sv-header__title{
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+.sv-search,
+.sv-search::placeholder{
+  font-family: var(--font-body);
+  font-weight: 500;
 }

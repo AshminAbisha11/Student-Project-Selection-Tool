@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import HeaderBar from '../components/headerBar';
+import HeaderBar from '../components/supervisorHeader';
 import SupervisorNav from '../components/supervisorNav';
 import './supervisorAllocatedStudentsPage.css';
 
