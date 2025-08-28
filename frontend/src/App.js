@@ -32,6 +32,9 @@ import AdminAllocationsPage from "./pages/adminAllocationPage";  // NEW (your cu
 import AdminSignupPage from "./pages/adminSignupPage";
 import AdminLoginPage from "./pages/adminLoginPage";
 
+// Settings Pages
+import ProfileSettingsPage from "./pages/supervisorProfileSettingsPage";
+
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 /* ============================
@@ -269,6 +272,27 @@ function App() {
 
         {/* Help & Support */}
         <Route path="/help-support" element={<HelpSupportPage />} />
+        {/* alias so dashboard tile can use /help */}
+        <Route path="/help" element={<HelpSupportPage />} />
+
+        {/* Settings */}
+        <Route
+          path="/settings/profile"
+          element={
+            <ProtectedRoute roles={["student", "supervisor", "admin"]}>
+              <ProfileSettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        {/* alias to reuse existing change-password UI */}
+        <Route
+          path="/settings/password"
+          element={
+            <ProtectedRoute roles={["student", "supervisor", "admin"]}>
+              <ChangePassword />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Fallback -> root redirect */}
         <Route path="*" element={<Navigate to="/" replace />} />
