@@ -1,9 +1,11 @@
 import React from 'react';
-// remove filterBar.css if it was overriding things
 
 const FilterBar = ({ filters, onChange, onSearch, onReset }) => {
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') onSearch();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      onSearch();
+    }
   };
 
   return (
@@ -11,6 +13,7 @@ const FilterBar = ({ filters, onChange, onSearch, onReset }) => {
       <h4>Filters</h4>
 
       <div className="field">
+        <label>Supervisor</label>
         <input
           type="text"
           name="supervisor"
@@ -18,10 +21,12 @@ const FilterBar = ({ filters, onChange, onSearch, onReset }) => {
           value={filters.supervisor}
           onChange={onChange}
           onKeyDown={handleKeyDown}
+          autoComplete="off"
         />
       </div>
 
       <div className="field">
+        <label>Topic</label>
         <input
           type="text"
           name="topic"
@@ -29,10 +34,12 @@ const FilterBar = ({ filters, onChange, onSearch, onReset }) => {
           value={filters.topic}
           onChange={onChange}
           onKeyDown={handleKeyDown}
+          autoComplete="off"
         />
       </div>
 
       <div className="field">
+        <label>Keyword</label>
         <input
           type="text"
           name="keyword"
@@ -40,6 +47,7 @@ const FilterBar = ({ filters, onChange, onSearch, onReset }) => {
           value={filters.keyword}
           onChange={onChange}
           onKeyDown={handleKeyDown}
+          autoComplete="off"
         />
       </div>
 

@@ -10,7 +10,6 @@ const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
 const isStudentIdeaTopic = (topic) => normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
 
 async function getActiveCycleId() {
-  // Prefer explicit "open" status
   const [byStatus] = await db.query(`
     SELECT cycle_id FROM allocation_cycles
     WHERE status='open'
@@ -19,7 +18,6 @@ async function getActiveCycleId() {
   `);
   if (byStatus.length) return byStatus[0].cycle_id;
 
-  // Fallback: date window
   const [byDate] = await db.query(`
     SELECT cycle_id FROM allocation_cycles
     WHERE NOW() BETWEEN submission_open_at AND submission_close_at
@@ -35,26 +33,52 @@ const parseBool = (v, def = false) => {
   return s === '1' || s === 'true' || s === 'yes';
 };
 
+/* -------------------------------------------
+   Public browse columns/joins (correct mapping)
+   - projects.supervisor_id stores a users.user_id
+-------------------------------------------- */
 const baseColumns = `
-  p.project_id, p.title, p.description, p.topic, p.keywords,
-  p.supervisor_id, p.supervisor_name,
-  p.quota, p.spots_filled,
+  p.project_id,
+  p.title,
+  p.description,
+  p.topic,
+  p.keywords,
+  p.quota,
+  p.spots_filled,
   GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
-  p.approval_status, p.is_student_proposal,
-  p.created_at, p.updated_at, p.is_archived
+  p.approval_status,
+  p.is_student_proposal,
+  p.is_student_pool,
+  p.cycle_id,
+  p.created_at,
+  p.updated_at,
+  p.is_archived,
+
+  -- identities
+  u.user_id AS supervisor_user_id,
+  s.supervisor_id AS supervisor_profile_id,
+
+  -- name + email with sensible fallbacks
+  COALESCE(s.name, p.supervisor_name) AS supervisor_name,
+  COALESCE(u.email, s.email)          AS supervisor_email
+`;
+
+const baseJoins = `
+  LEFT JOIN users u       ON u.user_id       = p.supervisor_id
+  LEFT JOIN supervisors s ON s.user_id       = u.user_id
 `;
 
 /* ========================================================
  * PUBLIC / BROWSE  (archived hidden by default)
  * ====================================================== */
 
-/** 1) Get all projects (non-archived) */
 exports.getAllProjects = async (_req, res) => {
   try {
     const [rows] = await db.query(
       `
       SELECT ${baseColumns}
       FROM projects p
+      ${baseJoins}
       WHERE p.is_archived = 0
       ORDER BY p.created_at DESC, p.project_id DESC
       `
@@ -66,10 +90,8 @@ exports.getAllProjects = async (_req, res) => {
   }
 };
 
-/** 2) Full project details by ID (public view; hides archived) */
 exports.getProjectDetails = async (req, res) => {
-  const { projectId } = req.params;
-  const id = Number(projectId);
+  const id = Number(req.params.projectId);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ message: 'Invalid projectId' });
   }
@@ -77,13 +99,13 @@ exports.getProjectDetails = async (req, res) => {
   try {
     const [rows] = await db.execute(
       `
-      SELECT 
-        p.project_id, p.title, p.supervisor_name, p.topic, p.keywords,
-        p.quota, p.spots_filled, GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
-        p.approval_status, p.is_student_proposal, p.created_at, p.updated_at,
-        d.full_description, d.prerequisites
+      SELECT
+        ${baseColumns},
+        d.full_description,
+        d.prerequisites
       FROM projects p
-      LEFT JOIN project_details d ON p.project_id = d.project_id
+      ${baseJoins}
+      LEFT JOIN project_details d ON d.project_id = p.project_id
       WHERE p.project_id = ? AND p.is_archived = 0
       `,
       [id]
@@ -97,7 +119,6 @@ exports.getProjectDetails = async (req, res) => {
   }
 };
 
-/** 3) Filter by supervisor (case-insensitive, non-archived) */
 exports.filterBySupervisor = async (req, res) => {
   const { supervisor } = req.params;
   try {
@@ -105,8 +126,9 @@ exports.filterBySupervisor = async (req, res) => {
       `
       SELECT ${baseColumns}
       FROM projects p
+      ${baseJoins}
       WHERE p.is_archived = 0
-        AND LOWER(TRIM(p.supervisor_name)) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(s.name, p.supervisor_name))) = LOWER(TRIM(?))
       ORDER BY p.created_at DESC, p.project_id DESC
       `,
       [supervisor]
@@ -118,7 +140,6 @@ exports.filterBySupervisor = async (req, res) => {
   }
 };
 
-/** 4) Filter by topic (case-insensitive, non-archived) */
 exports.filterByTopic = async (req, res) => {
   const { topic } = req.params;
   try {
@@ -126,6 +147,7 @@ exports.filterByTopic = async (req, res) => {
       `
       SELECT ${baseColumns}
       FROM projects p
+      ${baseJoins}
       WHERE p.is_archived = 0
         AND LOWER(TRIM(p.topic)) = LOWER(TRIM(?))
       ORDER BY p.created_at DESC, p.project_id DESC
@@ -139,7 +161,6 @@ exports.filterByTopic = async (req, res) => {
   }
 };
 
-/** 5) Filter by keyword (non-archived) */
 exports.filterByKeyword = async (req, res) => {
   const { keyword } = req.query;
   if (!keyword || !String(keyword).trim()) {
@@ -151,6 +172,7 @@ exports.filterByKeyword = async (req, res) => {
       `
       SELECT ${baseColumns}
       FROM projects p
+      ${baseJoins}
       WHERE p.is_archived = 0
         AND p.keywords LIKE ?
       ORDER BY p.created_at DESC, p.project_id DESC
@@ -164,7 +186,6 @@ exports.filterByKeyword = async (req, res) => {
   }
 };
 
-/** 6) Multi-filter (partial/case-insensitive; non-archived) */
 exports.multiFilteredProjects = async (req, res) => {
   const { supervisor, topic, keyword } = req.query;
 
@@ -172,7 +193,7 @@ exports.multiFilteredProjects = async (req, res) => {
   const params = [];
 
   if (supervisor && supervisor.trim()) {
-    clauses.push('LOWER(TRIM(p.supervisor_name)) LIKE LOWER(TRIM(?))');
+    clauses.push('LOWER(TRIM(COALESCE(s.name, p.supervisor_name))) LIKE LOWER(TRIM(?))');
     params.push(`%${supervisor}%`);
   }
   if (topic && topic.trim()) {
@@ -180,9 +201,8 @@ exports.multiFilteredProjects = async (req, res) => {
     params.push(`%${topic}%`);
   }
   if (keyword && keyword.trim()) {
-    // Search keywords, title, and description
-    clauses.push('(p.keywords LIKE ? OR p.title LIKE ? OR p.description LIKE ?)');
     const k = `%${keyword}%`;
+    clauses.push('(p.keywords LIKE ? OR p.title LIKE ? OR p.description LIKE ?)');
     params.push(k, k, k);
   }
 
@@ -191,6 +211,7 @@ exports.multiFilteredProjects = async (req, res) => {
       `
       SELECT ${baseColumns}
       FROM projects p
+      ${baseJoins}
       WHERE ${clauses.join(' AND ')}
       ORDER BY p.created_at DESC, p.project_id DESC
       `,
@@ -204,26 +225,41 @@ exports.multiFilteredProjects = async (req, res) => {
   }
 };
 
-/** 7) Search by title/description (non-archived) */
 exports.searchProjects = async (req, res) => {
-  const { query: searchTerm } = req.query;
-  if (!searchTerm || !String(searchTerm).trim()) {
+  const term = (req.query.query || '').trim();
+  if (!term) {
     return res.status(400).json({ message: 'Search term required' });
   }
 
   try {
-    const like = `%${searchTerm}%`;
-    const [rows] = await db.execute(
-      `
+    const tokens = term.split(/\s+/).slice(0, 5);
+    const fields = [
+      'p.title',
+      'p.description',
+      'COALESCE(s.name, p.supervisor_name)',
+      'p.topic',
+      'p.keywords',
+    ];
+
+    const where = ['p.is_archived = 0'];
+    const params = [];
+
+    tokens.forEach((word) => {
+      const like = `%${word}%`;
+      const ors = fields.map((f) => `${f} LIKE ?`).join(' OR ');
+      where.push(`(${ors})`);
+      for (let i = 0; i < fields.length; i += 1) params.push(like);
+    });
+
+    const sql = `
       SELECT ${baseColumns}
       FROM projects p
-      WHERE p.is_archived = 0
-        AND (p.title LIKE ? OR p.description LIKE ?)
+      ${baseJoins}
+      WHERE ${where.join(' AND ')}
       ORDER BY p.created_at DESC, p.project_id DESC
-      `,
-      [like, like]
-    );
+    `;
 
+    const [rows] = await db.execute(sql, params);
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error searching projects:', error);
@@ -232,11 +268,9 @@ exports.searchProjects = async (req, res) => {
 };
 
 /* ========================================================
- * SUPERVISOR AREA
+ * SUPERVISOR AREA (auth required)
  * ====================================================== */
 
-// My projects (owned by logged-in supervisor)
-// ?archived=1 -> archived only; ?archived=0 -> active only (default); ?archived=all -> both
 exports.getMyProjects = async (req, res) => {
   const supervisorId = req.user?.user_id;
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
@@ -245,9 +279,7 @@ exports.getMyProjects = async (req, res) => {
   let where = 'WHERE p.supervisor_id = ?';
   const params = [supervisorId];
 
-  if (archivedParam === 'all') {
-    // no extra filter
-  } else {
+  if (archivedParam !== 'all') {
     const archived = parseBool(archivedParam, false) ? 1 : 0;
     where += ' AND p.is_archived = ?';
     params.push(archived);
@@ -286,7 +318,6 @@ exports.getMyProjects = async (req, res) => {
   }
 };
 
-// Fetch a single supervisor-owned project (with details)
 exports.getMyProjectById = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { projectId } = req.params;
@@ -322,7 +353,6 @@ exports.getMyProjectById = async (req, res) => {
   }
 };
 
-// Update a project (main fields + details)
 exports.updateMyProject = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { projectId } = req.params;
@@ -349,7 +379,6 @@ exports.updateMyProject = async (req, res) => {
     return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
   }
 
-  // recompute pool flags from topic
   const studentPool = isStudentIdeaTopic(topic);
   const cycleId = studentPool ? await getActiveCycleId() : null;
   if (studentPool && !cycleId) {
@@ -369,7 +398,6 @@ exports.updateMyProject = async (req, res) => {
       return res.status(404).json({ message: 'Project not found or not yours' });
     }
 
-    // update main table (+ pool flags)
     await conn.query(
       `UPDATE projects
        SET title = ?, description = ?, topic = ?, keywords = ?, quota = ?,
@@ -387,7 +415,6 @@ exports.updateMyProject = async (req, res) => {
       ]
     );
 
-    // upsert project_details
     await conn.query(
       `INSERT INTO project_details (project_id, full_description, prerequisites)
        VALUES (?, ?, ?)
@@ -426,9 +453,6 @@ exports.updateMyProject = async (req, res) => {
   }
 };
 
-/* ========================================================
- * CREATE
- * ====================================================== */
 exports.createProject = async (req, res) => {
   try {
     if (!req.user || req.user.role !== 'supervisor') {
@@ -455,10 +479,9 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
     }
 
-    const supervisor_id = req.user.user_id;
+    const supervisor_id = req.user.user_id; // projects.supervisor_id stores users.user_id
     const supervisor_name = req.user.name || '';
 
-    // Pool logic from topic
     const studentPool = isStudentIdeaTopic(topic);
     const cycleId = studentPool ? await getActiveCycleId() : null;
     if (studentPool && !cycleId) {
@@ -469,37 +492,39 @@ exports.createProject = async (req, res) => {
     try {
       await conn.beginTransaction();
 
-      const insertProjectSql = `
+      const [result] = await conn.query(
+        `
         INSERT INTO projects
           (title, description, supervisor_name, topic, keywords,
            quota, spots_filled, approval_status, supervisor_id,
            is_student_pool, cycle_id,
            is_student_proposal, is_archived)
         VALUES (?, ?, ?, ?, ?, ?, 0, 'approved', ?, ?, ?, 0, 0)
-      `;
-      const [result] = await conn.query(insertProjectSql, [
-        title.trim(),
-        description.trim(),
-        supervisor_name,
-        topic ? String(topic).trim() : null,
-        keywords ? String(keywords).trim() : null,
-        q,
-        supervisor_id,
-        studentPool ? 1 : 0,
-        cycleId,
-      ]);
+        `,
+        [
+          title.trim(),
+          description.trim(),
+          supervisor_name,
+          topic ? String(topic).trim() : null,
+          keywords ? String(keywords).trim() : null,
+          q,
+          supervisor_id,
+          studentPool ? 1 : 0,
+          cycleId,
+        ]
+      );
 
       const project_id = result.insertId;
 
-      const insertDetailsSql = `
-        INSERT INTO project_details (project_id, full_description, prerequisites)
-        VALUES (?, ?, ?)
-      `;
-      await conn.query(insertDetailsSql, [
-        project_id,
-        full_description ? String(full_description).trim() : null,
-        prerequisites ? String(prerequisites).trim() : null,
-      ]);
+      await conn.query(
+        `INSERT INTO project_details (project_id, full_description, prerequisites)
+         VALUES (?, ?, ?)`,
+        [
+          project_id,
+          full_description ? String(full_description).trim() : null,
+          prerequisites ? String(prerequisites).trim() : null,
+        ]
+      );
 
       await conn.commit();
 
@@ -527,9 +552,6 @@ exports.createProject = async (req, res) => {
   }
 };
 
-/* ========================================================
- * ARCHIVE / UNARCHIVE / DELETE
- * ====================================================== */
 exports.archiveProject = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { projectId } = req.params;
