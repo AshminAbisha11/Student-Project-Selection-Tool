@@ -147,8 +147,31 @@
 .sv-layout .numbers{ display:flex; align-items:center; gap:12px; }
 .sv-layout .numbers span{ font-size:13.5px; color:#333; white-space:nowrap; }
 .sv-layout .numbers span + span{ padding-left:12px; border-left:1px solid #eee; }
-.sv-layout .footer-row{ margin-top:auto; padding-top:12px; border-top:1px solid #f2f2fa; display:flex; justify-content:space-between; align-items:flex-end; gap:10px; }
-.sv-layout .dates{ color:#7a7390; font-size:12px; line-height:1.35; max-width:62%; }
+.sv-layout .footer-row{
+  /* switch to 2-column layout: dates on the left, actions on the right */
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+}.sv-layout .dates{ color:#7a7390; font-size:12px; line-height:1.35; max-width:62%; }
+
+.sv-layout .card-actions{
+  display: flex !important;          /* force row layout */
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  white-space: nowrap;                /* prevent wrapping */
+}
+
+.sv-layout .card-actions .btn{
+  flex: 0 0 auto;                     /* don’t stretch */
+  height: 34px;
+  padding: 0 12px;
+  line-height: 34px;
+  border-radius: 999px;
+}
+
 
 /* Phones */
 @media (max-width:760px){
