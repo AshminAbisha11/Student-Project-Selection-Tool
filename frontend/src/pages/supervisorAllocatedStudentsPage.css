@@ -1,138 +1,101 @@
-/* ------------------------------------------------------------------
-   Allocated Students — layout + alignment (header on top, sidebar below)
-   ------------------------------------------------------------------ */
-
-:root {
-  --page-max: 1180px;
+:root{
+  --page-max: 1180px;   /* keep for other pages if needed */
   --brand: #5b21b6;
-
-  /* adjust if your HeaderBar/Sidebar sizes differ */
   --header-h: 64px;
-  --sidebar-w: 240px;
+  --sidebar-w: 280px;
+  --gutter: 24px;       /* spacing between panel and window edge */
 }
 
-/* Optional helpers if your HeaderBar/Sidebar are fixed elsewhere */
-.with-fixed-header .alloc-shell { padding-top: var(--header-h); }
-.with-fixed-sidebar .alloc-main { margin-left: var(--sidebar-w); }
-
-/* ---------- Page structure --------------------------------------- */
-/* Full-width header goes above this container */
-.alloc-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;   /* header on top, content under it */
-  background: #faf9ff;
+/* main content already offset by the fixed sidebar/header */
+.sv-main{
+  margin-left: var(--sidebar-w);
+  padding-top: var(--header-h);
+  box-sizing: border-box;
 }
 
-/* Row under the header: sidebar + main area */
-.alloc-shell {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-/* If SupervisorNav uses fixed/absolute in its own CSS, neutralize it here
-   so it sits under the header and participates in the row layout. */
-.alloc-shell :where(.supervisor-nav, .sidebar, aside) {
-  position: static !important;
-  top: auto !important;
-  height: auto !important;
-}
-
-/* Main content column */
-.alloc-main {
-  flex: 1;
+/* ------------------ Allocated Students page --------------- */
+.alloc-main{
   display: flex;
   flex-direction: column;
+  min-height: calc(100vh - var(--header-h));
+}
+/* MAKE THE PANEL WIDE */
+.alloc-panel{
+  /* fill the whole main width, leaving a small gutter on both sides */
+  width: calc(100% - (var(--gutter) * 2));
+  max-width: none;                 /* remove 1100px cap */
+  margin: 24px var(--gutter);      /* no auto-centering anymore */
+  padding: 24px 28px;
+  border-radius: 16px;
+
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.08);
 }
 
-/* Centered inner width */
-.alloc-inner {
-  width: 100%;
-  max-width: var(--page-max);
-  margin: 0 auto;
-  padding: 24px 20px;
+
+/* optional: on very narrow screens keep it breathable */
+@media (max-width: 640px){
+  :root{ --gutter: 16px; }
 }
 
-/* ---------- Header + controls ----------------------------------- */
-.alloc-header {
+/* Header row inside the panel */
+.alloc-panel .alloc-header{
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
-
-.alloc-header h2 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.alloc-controls {
+.alloc-panel h2{ margin: 0; }
+.alloc-panel .alloc-controls{
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap; /* wrap on small screens */
 }
 
-.alloc-input {
-  height: 40px;
-  padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  background: #fff;
-  min-width: 240px;
-}
-
-.alloc-input:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(91, 33, 182, .12);
-}
-
-/* ---------- Grid + cards ---------------------------------------- */
-.alloc-grid {
+/* ------------------ Grid + cards -------------------------- */
+.alloc-grid{
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
+  margin-top: 12px; /* keep off the header */
 }
-
-.alloc-card {
+.alloc-card{
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 6px 24px rgba(0,0,0,.06);
   padding: 16px;
 }
-
-.alloc-card-hd {
+.alloc-card-hd{
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
   gap: 10px;
 }
-
-.alloc-title { margin: 0; font-size: 1.05rem; }
-
-.alloc-chip {
+.alloc-title{ margin: 0; font-size: 1.05rem; }
+.alloc-chip{
   font-size: .8rem;
   padding: 4px 10px;
   border-radius: 999px;
   background: #eee;
 }
+.alloc-chip.ok{ background: #e7f6ec; color: #217a3a; }
 
-.alloc-chip.ok { background: #e7f6ec; color: #217a3a; }
-
-.alloc-kv {
+/* key/value rows inside a card */
+.alloc-kv{
   display: grid;
   grid-template-columns: 110px 1fr;
   gap: 6px 12px;
   margin: 8px 0 12px;
 }
-.alloc-kv dt { color: #666; }
-.alloc-kv dd { margin: 0; }
+.alloc-kv dt{ color: #666; }
+.alloc-kv dd{ margin: 0; }
 
-/* ---------- Buttons --------------------------------------------- */
-.btn {
+/* ------------------ Buttons ------------------------------- */
+.btn{
   height: 40px;
   padding: 0 14px;
   background: var(--brand);
@@ -141,13 +104,17 @@
   border-radius: 10px;
   cursor: pointer;
 }
-.btn:hover { opacity: .95; }
-.btn-outline { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
-.btn-danger { background: #d11a2a; }
-.icon-btn { background: transparent; border: none; font-size: 18px; cursor: pointer; }
+.btn:hover{ opacity: .95; }
+.btn-outline{
+  background: #fff;
+  color: var(--brand);
+  border: 1px solid var(--brand);
+}
+.btn-danger{ background: #d11a2a; }
+.icon-btn{ background: transparent; border: none; font-size: 18px; cursor: pointer; }
 
-/* ---------- Alerts ---------------------------------------------- */
-.alloc-alert {
+/* ------------------ Alerts -------------------------------- */
+.alloc-alert{
   background: #fff3cd;
   border: 1px solid #ffeeba;
   color: #856404;
@@ -156,8 +123,8 @@
   margin: 8px 0 14px;
 }
 
-/* ---------- Modal ------------------------------------------------ */
-.alloc-modal-backdrop {
+/* ------------------ Modal --------------------------------- */
+.alloc-modal-backdrop{
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.25);
@@ -167,31 +134,26 @@
   padding: 16px;
   z-index: 1000;
 }
-
-.alloc-modal {
+.alloc-modal{
   width: min(760px, 95vw);
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 10px 40px rgba(0,0,0,.25);
   overflow: hidden;
 }
-
 .alloc-modal-hd,
-.alloc-modal-ft {
+.alloc-modal-ft{
   padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
+.alloc-modal-hd{ border-bottom: 1px solid #f0f0f0; }
+.alloc-modal-ft{ border-top: 1px solid #f0f0f0; }
+.alloc-modal-body{ padding: 16px; }
+.muted{ color: #667085; }
 
-.alloc-modal-hd { border-bottom: 1px solid #f0f0f0; }
-.alloc-modal-ft { border-top: 1px solid #f0f0f0; }
-
-.alloc-modal-body { padding: 16px; }
-.muted { color: #667085; }
-
-/* ---------- Responsive tweaks ----------------------------------- */
-@media (max-width: 640px) {
-  .alloc-kv { grid-template-columns: 1fr; }  /* stack labels/values */
-  .alloc-input { min-width: 0; flex: 1; }
+/* ------------------ Responsive ---------------------------- */
+@media (max-width: 640px){
+  .alloc-kv{ grid-template-columns: 1fr; } /* stack label/value */
 }
