@@ -1,62 +1,80 @@
-/* full-width bar visuals */
+/* Ensure the page itself doesn't add a top gap */
+html, body { margin: 0; }
+
+/* Header sizing */
+:root { --header-h: 64px; }
+
+/* Fixed header aligned to the sidebar */
 .sv-header{
+  position: fixed;
+  top: 0;
+  height: var(--header-h);
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0 24px;
+  box-sizing: border-box;
+
+  color: #fff;
   background: linear-gradient(90deg,#5c2d91,#5c2d91 28%, #4a34b0 70%);
-  color:#fff;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  width:100%;
-  height:64px;
-  border-radius:0;                 /* keep edge-to-edge */
-  padding:0 32px;                  /* aligns with grid gutters */
-  box-sizing:border-box;
+  box-shadow: 0 6px 20px rgba(75, 35, 118, .18);
 }
 
-/* left section with logo + title */
-.sv-header__left{
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
-
-.sv-header__logo{
-  height:28px;                     /* tweak to your asset */
-  width:auto;
-  display:block;
-}
-
+/* Left side */
+.sv-header__left{ display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sv-header__title{
-  margin:0;
-  font-size:18px;
-  font-weight:800;
-  letter-spacing:.2px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* right controls */
-.sv-header__right{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-
+/* Right side */
+.sv-header__right{ display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sv-search-wrap{ display:flex; align-items:center; gap:6px; }
 .sv-search{
-  background:#fff;
-  border:none;
-  outline:none;
-  border-radius:999px;
-  padding:8px 14px;
-  min-width:240px;
+  background:#fff; border:none; outline:none;
+  border-radius:999px; padding:8px 14px; min-width:240px;
 }
 
-.sv-search-btn,
-.sv-profile-btn{
-  background:#e6d6fa;
-  border:none;
-  border-radius:999px;
-  height:36px;
-  width:36px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  cursor:pointer;
+/* Avatar + dropdown */
+.sv-user{ position: relative; display: flex; align-items: center; gap: 6px; }
+.sv-avatar{
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-weight: 800; background:#e6d6fa; color:#4b2376;
+  overflow: hidden; user-select: none;
+}
+.sv-avatar img{ width:100%; height:100%; object-fit:cover; display:block; border-radius:50%; }
+.sv-caret{
+  background: transparent; border: none; color: #fff;
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; cursor: pointer;
+}
+.sv-caret:focus-visible{ outline:2px solid rgba(255,255,255,.7); outline-offset:2px; }
+
+/* Dropdown panel */
+.sv-menu-panel{
+  position: absolute; right: 0; top: calc(100% + 8px);
+  min-width: 180px; background:#fff; color:#2b2140;
+  border: 1px solid #ede7ff; border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(75,35,118,.18); padding: 8px; z-index: 1100;
+}
+.sv-menu-item{
+  width: 100%; text-align: left; background: transparent; border: none;
+  padding: 10px 12px; border-radius: 10px; font-weight: 600; cursor: pointer;
+}
+.sv-menu-item:hover{ background: #f6f1ff; }
+
+/* Push page content below the fixed header and align with the sidebar */
+.sv-main{ padding-top: var(--header-h); box-sizing: border-box; }
+
+/* Hide search on narrow viewports */
+@media (max-width: 900px) {
+  .sv-search-wrap { display: none; }
 }

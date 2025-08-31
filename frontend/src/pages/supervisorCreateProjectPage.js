@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+// src/pages/SupervisorCreateProjectPage.jsx
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import HeaderBar from '../components/headerBar';
-import SideBar from '../components/sideBar';
+import SupervisorHeader from '../components/supervisorHeader';
+import SupervisorNav from '../components/supervisorNav';
 import './supervisorCreateProjectPage.css';
 
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 const STUDENT_IDEA_TOPIC = 'Student Proposal Ideas';
 
 const initialForm = {
@@ -16,11 +17,50 @@ const initialForm = {
   quota: '',
 };
 
+/* Fixed, full-bleed background rendered in JS */
+function SupervisorBg({ src = '/assets/login_background.png' }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: -1,
+        pointerEvents: 'none',
+        background:
+          'radial-gradient(1200px 800px at -10% -10%, rgba(123,44,191,.16), transparent 60%),' +
+          'radial-gradient(1000px 700px at 110% 110%, rgba(106,76,255,.14), transparent 55%),' +
+          `url("${src}") center / cover no-repeat,` +
+          'linear-gradient(180deg, #f7f3ff 0%, #faf9ff 100%)',
+      }}
+    />
+  );
+}
+
 export default function SupervisorCreateProjectPage() {
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
   const navigate = useNavigate();
+  const token = localStorage.getItem('token');
+  const user  = JSON.parse(localStorage.getItem('user') || 'null');
+
+  // Gate: must be logged in and be a supervisor
+  useEffect(() => {
+    if (!token || !user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (String(user.role || '').toLowerCase() !== 'supervisor') {
+      navigate('/student-dashboard', { replace: true });
+    }
+  }, [navigate, token, user]);
+
+  const authHeaders = useMemo(() => ({
+    'Content-Type': 'application/json',
+    Authorization: token ? `Bearer ${token}` : '',
+  }), [token]);
 
   const onChange = (e) => {
     const { name, value } = e.target;
@@ -28,20 +68,22 @@ export default function SupervisorCreateProjectPage() {
     setForm((f) => ({ ...f, [name]: value }));
   };
 
-  // If they pick "Student Proposal Ideas" and the title is blank, auto-suggest a sensible title
+  // Auto-suggest title if Student Proposal pool is selected and title is blank
   useEffect(() => {
     if (form.topic === STUDENT_IDEA_TOPIC && !form.title.trim()) {
       setForm((f) => ({ ...f, title: 'Student Proposed Ideas' }));
     }
-  }, [form.topic]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.topic]);
 
   const validate = () => {
     if (!form.title.trim()) return 'Title is required.';
     if (!form.topic.trim()) return 'Topic is required.';
     if (!form.description.trim()) return 'Short description is required.';
     if (!form.full_description.trim()) return 'Full description is required.';
-    if (!form.quota || isNaN(Number(form.quota)) || Number(form.quota) < 1)
+    if (!form.quota || isNaN(Number(form.quota)) || Number(form.quota) < 1) {
       return 'Quota must be a number ≥ 1.';
+    }
     return '';
   };
 
@@ -50,20 +92,16 @@ export default function SupervisorCreateProjectPage() {
     const msg = validate();
     if (msg) return setError(msg);
 
-    const token = localStorage.getItem('token');
     if (!token) return setError('Please log in as a supervisor.');
 
     try {
       setSubmitting(true);
       const res = await fetch(`${API}/projects/create-project`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: authHeaders,
         body: JSON.stringify({
           title: form.title.trim(),
-          topic: form.topic.trim(), // backend uses this to toggle is_student_pool/cycle_id
+          topic: form.topic.trim(),   // backend toggles student idea pool via topic
           description: form.description.trim(),
           full_description: form.full_description.trim(),
           prerequisites: form.prerequisites.trim(),
@@ -72,8 +110,8 @@ export default function SupervisorCreateProjectPage() {
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        // Friendly message when there is no active allocation cycle
         if (res.status === 409) {
           throw new Error(
             data.message ||
@@ -84,9 +122,9 @@ export default function SupervisorCreateProjectPage() {
       }
 
       alert('Project created successfully!');
-      navigate('/supervisor-dashboard'); // or /supervisor/my-projects
+      navigate('/supervisor/my-projects');
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to create project');
     } finally {
       setSubmitting(false);
     }
@@ -95,148 +133,163 @@ export default function SupervisorCreateProjectPage() {
   const isStudentIdea = form.topic === STUDENT_IDEA_TOPIC;
 
   return (
-    <div className="createproj-layout">
-      <SideBar />
-      <main className="createproj-main">
-        <HeaderBar />
+    <div className="sv-layout">
+      {/* JS background layer */}
+      <SupervisorBg src="/assets/login_background.png" />
 
-        <div className="createproj-inner">
-          <div className="createproj-header">
-            <h2>Create a New Project</h2>
-          </div>
+      {/* Fixed sidebar + header from your components */}
+      <SupervisorNav />
+      <SupervisorHeader />
 
-          {error && <div className="cp-alert">{error}</div>}
+      <main className="sv-main">
+        <section className="createproj-panel">
+          <div className="createproj-inner">
+            <div className="createproj-header">
+              <h2>Create a New Project</h2>
+            </div>
 
-          <form className="cp-form" onSubmit={onSubmit} noValidate>
-            <div className="cp-row">
-              <div className="cp-field">
-                <label>
-                  Title <span>*</span>
-                </label>
-                <input
-                  name="title"
-                  value={form.title}
-                  onChange={onChange}
-                  placeholder="e.g., NLP for Healthcare Notes"
-                  disabled={submitting}
-                />
+            {error && <div className="cp-alert">{error}</div>}
+
+            <form className="cp-form" onSubmit={onSubmit} noValidate>
+              <div className="cp-row">
+                <div className="cp-field">
+                  <label>
+                    Title <span>*</span>
+                  </label>
+                  <input
+                    name="title"
+                    value={form.title}
+                    onChange={onChange}
+                    placeholder="e.g., NLP for Healthcare Notes"
+                    disabled={submitting}
+                  />
+                </div>
+
+                <div className="cp-field">
+                  <label>
+                    Topic <span>*</span>
+                  </label>
+                  <select
+                    name="topic"
+                    value={form.topic}
+                    onChange={onChange}
+                    disabled={submitting}
+                  >
+                    <option value="">Select topic</option>
+                    <option>{STUDENT_IDEA_TOPIC}</option>
+                    <option>Artificial Intelligence</option>
+                    <option>Data Science</option>
+                    <option>Cybersecurity</option>
+                    <option>Human-Computer Interaction</option>
+                    <option>Software Engineering</option>
+                    <option>Other</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="cp-field">
-                <label>
-                  Topic <span>*</span>
-                </label>
-                <select
-                  name="topic"
-                  value={form.topic}
-                  onChange={onChange}
-                  disabled={submitting}
+              {/* Guidance panel when Student Proposal Ideas is selected */}
+              {isStudentIdea && (
+                <div
+                  className="cp-note"
+                  style={{
+                    background: '#f5f7ff',
+                    border: '1px solid #dfe4ff',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                    marginTop: 8,
+                    color: '#2a2d55',
+                  }}
                 >
-                  <option value="">Select topic</option>
-                  <option>{STUDENT_IDEA_TOPIC}</option>
-                  <option>Artificial Intelligence</option>
-                  <option>Data Science</option>
-                  <option>Cybersecurity</option>
-                  <option>Human-Computer Interaction</option>
-                  <option>Software Engineering</option>
-                  <option>Other</option>
-                </select>
-              </div>
-            </div>
+                  <strong>Student Proposal Ideas</strong> is an opt-in pool. Your <em>Quota</em>{' '}
+                  below is the number of student ideas you’re willing to take this cycle.
+                  An active allocation cycle is required.
+                </div>
+              )}
 
-            {/* Guidance panel when Student Proposal Ideas is selected */}
-            {isStudentIdea && (
-              <div
-                className="cp-note"
-                style={{
-                  background: '#f5f7ff',
-                  border: '1px solid #dfe4ff',
-                  borderRadius: 10,
-                  padding: '10px 12px',
-                  marginTop: 8,
-                  color: '#2a2d55',
-                }}
-              >
-                <strong>Student Proposal Ideas</strong> is an opt-in pool. Your{' '}
-                <em>Quota</em> below is the number of student ideas you’re willing to take
-                this cycle. An active allocation cycle is required.
-              </div>
-            )}
-
-            <div className="cp-field">
-              <label>
-                Short Description <span>*</span>
-              </label>
-              <textarea
-                name="description"
-                value={form.description}
-                onChange={onChange}
-                rows={3}
-                placeholder="One paragraph overview shown in listings"
-                disabled={submitting}
-              />
-            </div>
-
-            <div className="cp-field">
-              <label>
-                Full Description <span>*</span>
-              </label>
-              <textarea
-                name="full_description"
-                value={form.full_description}
-                onChange={onChange}
-                rows={6}
-                placeholder="Detailed description that appears in the modal"
-                disabled={submitting}
-              />
-            </div>
-
-            <div className="cp-row">
               <div className="cp-field">
-                <label>Prerequisites</label>
+                <label>
+                  Short Description <span>*</span>
+                </label>
                 <textarea
-                  name="prerequisites"
-                  value={form.prerequisites}
+                  name="description"
+                  value={form.description}
                   onChange={onChange}
                   rows={3}
-                  placeholder="e.g., Python, ML basics"
+                  placeholder="One paragraph overview shown in listings"
                   disabled={submitting}
                 />
               </div>
 
               <div className="cp-field">
                 <label>
-                  Quota <span>*</span>
+                  Full Description <span>*</span>
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  name="quota"
-                  value={form.quota}
+                <textarea
+                  name="full_description"
+                  value={form.full_description}
                   onChange={onChange}
-                  placeholder="e.g., 2"
+                  rows={6}
+                  placeholder="Detailed description that appears in the modal"
                   disabled={submitting}
                 />
               </div>
-            </div>
 
-            <div className="cp-actions">
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => setForm(initialForm)}
-                disabled={submitting}
-              >
-                Clear
-              </button>
+              <div className="cp-row">
+                <div className="cp-field">
+                  <label>Prerequisites</label>
+                  <textarea
+                    name="prerequisites"
+                    value={form.prerequisites}
+                    onChange={onChange}
+                    rows={3}
+                    placeholder="e.g., Python, ML basics"
+                    disabled={submitting}
+                  />
+                </div>
 
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Creating…' : 'Create Project'}
-              </button>
-            </div>
-          </form>
-        </div>
+                <div className="cp-field">
+                  <label>
+                    Quota <span>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="quota"
+                    value={form.quota}
+                    onChange={onChange}
+                    placeholder="e.g., 2"
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+
+              <div className="cp-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setForm(initialForm)}
+                  disabled={submitting}
+                >
+                  Clear
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-archive"
+                  onClick={() => navigate('/supervisor/my-projects')}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? 'Creating…' : 'Create Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
       </main>
     </div>
   );

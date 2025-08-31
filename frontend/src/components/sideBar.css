@@ -1,59 +1,99 @@
-/* Sidebar container */
-.sidebar {
-  position: fixed;
-  left: 0;
+/* =========================
+   SUPERVISOR LAYOUT (scoped)
+   ========================= */
+.sv-layout{
+  --header-h: 64px;
+  --sidebar-w: 280px;
+  --page-gutter: 16px;
+
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 800px at -10% -10%, rgba(123,44,191,.15), transparent 60%),
+    radial-gradient(1000px 700px at 110% 110%, rgba(123,44,191,.12), transparent 55%),
+    #f8f6ff;
+}
+
+/* ---- Sidebar (fixed, flush, no rounding) ---- */
+.sv-layout .sv-sidebar{
+  position: fixed !important;
+  top: 0; bottom: 0; left: 0; right: auto;
+  width: var(--sidebar-w);
+  overflow: auto;
+
+  margin: 0 !important;
+  border-right: 1px solid #ececf6;
+  border-radius: 0 !important;       /* no rounded edge -> no “notch” */
+  background: #fff;
+  box-shadow: none;                   /* avoid a light seam */
+  z-index: 900;
+}
+
+/* ---- Header (fixed, starts exactly at sidebar’s edge) ---- */
+.sv-layout .sv-header{
+  position: fixed !important;
   top: 0;
-  height: 100vh;
-  width: 220px;
-  background-color: #f4f4f4;
-  padding: 20px 0;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  z-index: 999;
-  overflow-y: auto;
-}
+  left: var(--sidebar-w);
+  width: calc(100% - var(--sidebar-w));  /* use 100%, not 100vw */
+  height: var(--header-h);
+  z-index: 950;
 
-/* Logo */
-.sidebar-logo {
-  width: 140px;
-  margin-bottom: 30px;
-}
-
-/* Sidebar menu list */
-.sidebar ul {
-  list-style-type: none;
-  padding: 0;
-  margin: 0;
-  width: 100%;
-}
-
-/* Sidebar list items */
-.sidebar ul li {
-  padding: 12px 20px;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  font-size: 16px;
-  color: #333;
-  border-left: 4px solid transparent;
-  background-color: transparent;
-  transition: all 0.3s ease;
+  border-radius: 0;
+  padding-inline: 32px;
   box-sizing: border-box;
 }
 
-/* Hover and active styling */
-.sidebar ul li:hover,
-.sidebar ul li.active {
-  background-color: #e0e0e0;
-  border-left: 4px solid #4b2e83; /* Aston purple */
-  font-weight: 600;
+/* If you render a wrapper around the header, keep only the height */
+.sv-layout .topbar-wrap{ height: var(--header-h); padding: 0; }
+
+/* ---- MAIN: only this gets the left offset ---- */
+.sv-layout .sv-main{
+  margin-left: var(--sidebar-w);
+  padding: calc(var(--header-h) + var(--page-gutter)) var(--page-gutter) var(--page-gutter);
+  box-sizing: border-box;
 }
 
-/* Responsive: hide on smaller screens */
-@media (max-width: 768px) {
-  .sidebar {
-    display: none;
+/* ---- Neutralize any extra left offsets inside the page ---- */
+.sv-layout .content-area,
+.sv-layout .alloc-main,
+.sv-layout .myproj-panel,
+.sv-layout .page-inner,
+.sv-layout .main-grid,
+.sv-layout .alloc-shell,
+.sv-layout .app{
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+/* If you kept a two-column grid previously, show content normally */
+.sv-layout .main-grid{
+  display: block !important;
+}
+
+/* ---- Mobile: slide sidebar off-canvas, header full width ---- */
+@media (max-width: 900px){
+  .sv-layout .sv-sidebar{
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+  }
+  .sv-layout .sv-sidebar.is-open{ transform: translateX(0); }
+
+  .sv-layout .sv-header{
+    left: 0;
+    width: 100%;
+  }
+  .sv-layout .sv-main{
+    margin-left: 0;
+    padding-top: calc(var(--header-h) + var(--page-gutter));
+  }
+
+  /* keep everything else zeroed */
+  .sv-layout .content-area,
+  .sv-layout .alloc-main,
+  .sv-layout .myproj-panel,
+  .sv-layout .page-inner,
+  .sv-layout .main-grid{
+    margin-left: 0 !important;
+    padding-left: 0 !important;
   }
 }
