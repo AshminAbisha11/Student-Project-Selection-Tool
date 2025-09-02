@@ -1,156 +1,160 @@
-// src/pages/adminLoginPage.jsx
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { Link, useNavigate } from 'react-router-dom';
 import './adminLoginPage.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-// Set this to your actual backend route. If your server mounts under /auth, set it to '/auth/admin-login'
 const ADMIN_LOGIN_PATH =
-  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/admin-login';
+  process.env.REACT_APP_ADMIN_LOGIN_PATH || '/login';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [showPw, setShowPw] = useState(false);
-  const [err, setErr] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw]     = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
 
-  const update = (k) => (e) => {
-    setErr('');
-    setForm((v) => ({ ...v, [k]: e.target.value }));
-  };
-
-  const safeNavigate = (to) => {
-    // avoids “Cannot update a component while rendering a different component” in rare cases
-    requestAnimationFrame(() => {
-      try {
-        navigate(to, { replace: true });
-      } catch {
-        window.location.assign(to);
-      }
-    });
-  };
-
-  const submit = async (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
-    const email = form.email.trim();
-    const password = form.password;
+    setError('');
 
-    if (!email || !password) {
-      setErr('Please fill in both email and password.');
+    const eMail = email.trim();
+    if (!eMail || !password) {
+      setError('Please enter email and password.');
       return;
     }
 
     try {
-      setSubmitting(true);
+      setLoading(true);
 
-      // Clear any stale session
+      // clear stale session
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('role');
 
-      const { data } = await axios.post(
-        `${API}${ADMIN_LOGIN_PATH}`,
-        { email, password },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      const res = await fetch(`${API}${ADMIN_LOGIN_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: eMail, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Login failed');
 
       if (!data?.token || !data?.user) {
-        setErr('Invalid response from server.');
-        return;
+        throw new Error('Invalid response from server.');
       }
 
-      const role = String(data.user.role || '').toLowerCase();
-      if (role !== 'admin') {
-        setErr('This account is not an admin.');
-        return;
-      }
+      const role    = String(data.user.role || '').toLowerCase();
+      const isAdmin = role === 'admin' || data.user.is_admin === true;
+      if (!isAdmin) throw new Error('This account is not an admin.');
 
-      // Persist session
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.setItem('role', role);
+      localStorage.setItem('role', 'admin');
 
-      safeNavigate('/admin');
-    } catch (e2) {
-      const msg =
-        e2?.response?.data?.message ||
-        (e2?.response?.status === 404
-          ? 'Login endpoint not found. Check ADMIN_LOGIN_PATH.'
-          : e2?.message) ||
-        'Login failed';
-      setErr(msg);
+      navigate('/admin', { replace: true });
+    } catch (err) {
+      setError(err?.message || 'Login failed');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
     <div
-      className="al-root"
-      style={{ backgroundImage: "url('/assets/login_background.png')" }}
+      className="ad-root"
+      /* background from PUBLIC: public/assets/login_background.png */
+      style={{ '--bg-img': "url('/assets/login_background.png')" }}
     >
-      <div className="al-card">
-        <h1 className="al-title">Admin Login</h1>
-        <p className="al-sub">
-          Use your admin email and password
-        </p>
+      <div className="ad-card">
+        {/* LEFT: brand + form (kept identical rhythm to student page) */}
+        <div className="ad-left">
+          <div className="ad-left-inner">
+            <div className="ad-brand">
+              <img src="/assets/aston_logo.png" alt="Aston University" className="ad-logo" />
+              <h1 className="ad-portal-title">Student Project Selection Tool</h1>
+            </div>
 
-        {err && <div className="al-alert">{err}</div>}
+            <h2 className="ad-h2">Admin Login</h2>
 
-        <form className="al-form" onSubmit={submit} noValidate>
-          <label>
-            Email
-            <input
-              type="email"
-              value={form.email}
-              onChange={update('email')}
-              placeholder="you@aston.ac.uk or you@gmail.com"
-              autoComplete="email"
-              disabled={submitting}
-              required
-            />
-          </label>
+            {error && (
+              <div className="ad-alert" role="alert" aria-live="polite">
+                {error}
+              </div>
+            )}
 
-          <label>
-            Password
-            <div className="al-input-wrap">
+            <form className="ad-form" onSubmit={onSubmit} noValidate>
+              <label htmlFor="ad-email" className="sr-only">Email</label>
               <input
-                type={showPw ? 'text' : 'password'}
-                value={form.password}
-                onChange={update('password')}
-                placeholder="Password"
-                autoComplete="current-password"
-                disabled={submitting}
+                id="ad-email"
+                type="email"
+                placeholder="you@aston.ac.uk"
+                value={email}
+                onChange={(e) => {
+                  setError('');
+                  setEmail(e.target.value);
+                }}
+                autoComplete="email"
+                disabled={loading}
                 required
               />
+
+              <label htmlFor="ad-password" className="sr-only">Password</label>
+              <div className="ad-passwrap">
+                <input
+                  id="ad-password"
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => {
+                    setError('');
+                    setPassword(e.target.value);
+                  }}
+                  autoComplete="current-password"
+                  disabled={loading}
+                  required
+                />
+                <button
+                  type="button"
+                  className="ad-show"
+                  onClick={() => setShowPw((s) => !s)}
+                  disabled={loading || !password}
+                  aria-label={showPw ? 'Hide password' : 'Show password'}
+                >
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
+
+              <div className="ad-links-row">
+                <Link to="/forgot-password" className="ad-link">Forgot password?</Link>
+              </div>
+
               <button
-                type="button"
-                className="al-eye"
-                onClick={() => setShowPw((s) => !s)}
-                disabled={submitting || !form.password}
-                aria-label={showPw ? 'Hide password' : 'Show password'}
+                type="submit"
+                className={`ad-btn${loading ? ' ad-btn--loading' : ''}`}
+                disabled={loading}
               >
-                {showPw ? 'Hide' : 'Show'}
+                {loading ? 'Signing in…' : 'Login'}
               </button>
-            </div>
-          </label>
 
-          <button className="al-btn" type="submit" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Login'}
-          </button>
-        </form>
-
-        <div className="al-foot">
-          <Link to="/admin-signup" className="al-link">
-            Need to create an admin account?
-          </Link>
-          <Link to="/login" className="al-link">
-            Back to user login
-          </Link>
+              <div className="ad-under">
+                <Link to="/login" className="ad-link">Back to user login →</Link>
+              </div>
+            </form>
+          </div>
         </div>
+
+        {/* RIGHT: CTA panel */}
+        <aside className="ad-right" aria-label="Create admin account">
+          <h3 className="ad-right-title">New to the Admin Portal?</h3>
+          <p className="ad-right-text">
+            Create an admin account to manage cycles, projects, and allocations.
+          </p>
+          <Link to="/admin-signup" className="ad-cta">
+            Create Admin Account
+          </Link>
+        </aside>
       </div>
     </div>
   );
