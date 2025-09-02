@@ -196,42 +196,49 @@ exports.update = async (req, res) => {
 
 // POST /cycle/:id/open
 // Auto-seed projects from the latest previous cycle into this cycle
+// POST /cycle/:id/open
 exports.openNow = async (req, res) => {
   let conn;
   try {
     const { id } = req.params;
+    const cycleId = Number(id);
 
     conn = await db.getConnection();
     await conn.beginTransaction();
 
-    // 1) close other cycles
+    // 1) Close any other open cycle
     await conn.query(
-      `UPDATE allocation_cycles SET status='closed' WHERE status='open' AND cycle_id<>?`,
-      [id]
+      `UPDATE allocation_cycles
+         SET status='closed'
+       WHERE status='open' AND cycle_id <> ?`,
+      [cycleId]
     );
 
-    // 2) open this one (mark actual open time)
+    // 2) Open this one now
     await conn.query(
       `UPDATE allocation_cycles
          SET status='open', submission_open_at = NOW()
-       WHERE cycle_id=?`,
-      [id]
+       WHERE cycle_id = ?`,
+      [cycleId]
     );
 
-    // 3) most recent previous cycle
+    // 3) Most recent previous cycle (if any)
     const [prevRows] = await conn.query(
       `SELECT cycle_id
          FROM allocation_cycles
         WHERE cycle_id <> ?
-     ORDER BY submission_open_at DESC
+        ORDER BY submission_open_at DESC
         LIMIT 1`,
-      [id]
+      [cycleId]
     );
 
+    /* ----------------------------
+       Seed from previous cycle
+       ---------------------------- */
     if (prevRows.length) {
       const prevId = prevRows[0].cycle_id;
 
-      // 4) seed approved, non-archived projects from previous cycle
+      // (3a) Insert projects from previous cycle (approved, not archived)
       await conn.query(
         `
         INSERT INTO projects (
@@ -245,7 +252,8 @@ exports.openNow = async (req, res) => {
           approval_status,
           is_student_pool,
           is_archived,
-          topic
+          topic,
+          keywords
         )
         SELECT
           src.title,
@@ -258,23 +266,117 @@ exports.openNow = async (req, res) => {
           src.approval_status,
           src.is_student_pool,
           0 AS is_archived,
-          src.topic
+          src.topic,
+          src.keywords
         FROM projects src
         LEFT JOIN projects dst
-          ON dst.supervisor_id = src.supervisor_id
-         AND dst.title         = src.title
-         AND dst.cycle_id      = ?
+          ON  dst.supervisor_id = src.supervisor_id
+          AND dst.title         = src.title
+          AND dst.cycle_id      = ?
         WHERE src.cycle_id = ?
           AND src.is_archived = 0
           AND LOWER(TRIM(src.approval_status)) = 'approved'
           AND dst.project_id IS NULL
         `,
-        [id, id, prevId]
+        [cycleId, cycleId, prevId]
+      );
+
+      // (3b) Copy project_details for those newly-created rows that came from prev cycle
+      await conn.query(
+        `
+        INSERT INTO project_details (project_id, full_description, prerequisites)
+        SELECT
+          dst.project_id,
+          det.full_description,
+          det.prerequisites
+        FROM projects dst
+        JOIN projects src
+          ON  src.supervisor_id = dst.supervisor_id
+          AND src.title         = dst.title
+         AND src.cycle_id       = ?
+        LEFT JOIN project_details det
+          ON det.project_id     = src.project_id
+        LEFT JOIN project_details already
+          ON already.project_id = dst.project_id
+        WHERE dst.cycle_id = ?
+          AND already.project_id IS NULL
+        `,
+        [prevId, cycleId]
       );
     }
 
+    /* ----------------------------
+       Seed from "drafts" (cycle_id IS NULL)
+       ---------------------------- */
+
+    // (4a) Insert projects created without a cycle (drafts)
+    await conn.query(
+      `
+      INSERT INTO projects (
+        title,
+        description,
+        supervisor_id,
+        supervisor_name,
+        cycle_id,
+        quota,
+        spots_filled,
+        approval_status,
+        is_student_pool,
+        is_archived,
+        topic,
+        keywords
+      )
+      SELECT
+        src.title,
+        src.description,
+        src.supervisor_id,
+        COALESCE(src.supervisor_name, ''),
+        ? AS cycle_id,
+        src.quota,
+        0 AS spots_filled,
+        src.approval_status,
+        src.is_student_pool,
+        0 AS is_archived,
+        src.topic,
+        src.keywords
+      FROM projects src
+      LEFT JOIN projects dst
+        ON  dst.supervisor_id = src.supervisor_id
+        AND dst.title         = src.title
+        AND dst.cycle_id      = ?
+      WHERE src.cycle_id IS NULL
+        AND src.is_archived = 0
+        AND LOWER(TRIM(src.approval_status)) = 'approved'
+        AND dst.project_id IS NULL
+      `,
+      [cycleId, cycleId]
+    );
+
+    // (4b) Copy project_details for newly-created rows that came from drafts (src.cycle_id IS NULL)
+    await conn.query(
+      `
+      INSERT INTO project_details (project_id, full_description, prerequisites)
+      SELECT
+        dst.project_id,
+        det.full_description,
+        det.prerequisites
+      FROM projects dst
+      JOIN projects src
+        ON  src.supervisor_id = dst.supervisor_id
+        AND src.title         = dst.title
+       AND src.cycle_id       IS NULL
+      LEFT JOIN project_details det
+        ON det.project_id     = src.project_id
+      LEFT JOIN project_details already
+        ON already.project_id = dst.project_id
+      WHERE dst.cycle_id = ?
+        AND already.project_id IS NULL
+      `,
+      [cycleId]
+    );
+
     await conn.commit();
-    res.json({ message: 'Cycle opened successfully' });
+    res.json({ message: 'Cycle opened successfully (seeded from previous cycle and drafts).' });
   } catch (e) {
     if (conn) try { await conn.rollback(); } catch {}
     console.error('openNow error:', e);

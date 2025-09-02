@@ -88,7 +88,7 @@ app.use('/allocations', allocationRoutes);
 app.use('/cycle', cycleRoutes);
 app.use('/users', userRoutes);
 app.use('/supervisor', supervisorDashboardRoutes);
-app.use('/supervisor-list', supervisorRoutes);
+app.use('/supervisor', supervisorRoutes);
 app.use('/admin', adminRoutes);
 app.use('/admin-signup', adminRegisterRoutes);
 app.use('/admin-login', adminLoginRoutes);

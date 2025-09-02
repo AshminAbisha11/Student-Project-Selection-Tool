@@ -27,7 +27,145 @@ async function cycleExists(id) {
   return r.length > 0;
 }
 
-/* ---------------- Handlers ---------------- */
+/* ---------------- NEW: Dashboard Overview ---------------- */
+// GET /supervisor/overview
+exports.getOverview = async (req, res) => {
+  try {
+    const supervisorId = req.user?.user_id;
+    if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+
+    // Projects (count non-archived regardless of status so drafts are included)
+    const [[projRow]] = await db.query(
+      `SELECT COUNT(*) AS projects
+         FROM projects
+        WHERE supervisor_id = ?
+          AND COALESCE(is_archived,0) = 0`,
+      [supervisorId]
+    );
+
+    // Proposals pending review (submitted/pending/under_review)
+    const [[propRow]] = await db.query(
+      `SELECT COUNT(*) AS pendingProposals
+         FROM proposals
+        WHERE supervisor_id = ?
+          AND COALESCE(status,'submitted') IN ('submitted','pending','under_review')`,
+      [supervisorId]
+    );
+
+    // Allocated students (distinct)
+    const [[allocRow]] = await db.query(
+      `SELECT COUNT(DISTINCT student_id) AS students
+         FROM allocations
+        WHERE supervisor_id = ?
+          AND status = 'allocated'`,
+      [supervisorId]
+    );
+
+    res.json({
+      projects: Number(projRow?.projects || 0),
+      pendingProposals: Number(propRow?.pendingProposals || 0),
+      studentsAllocated: Number(allocRow?.students || 0),
+    });
+  } catch (e) {
+    console.error('getOverview error:', e);
+    res.status(500).json({ message: 'Failed to load overview' });
+  }
+};
+
+/* ---------------- NEW: My Projects listing ---------------- */
+// GET /supervisor/projects?tab=active|draft|archived&q=searchTerm
+// GET /supervisor/projects?tab=active|draft|archived&cycle=active|all|<cycle_id>&q=...
+exports.getMyProjects = async (req, res) => {
+  try {
+    const supervisorId = req.user?.user_id;
+    if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const tab   = String(req.query.tab || 'active').toLowerCase();
+    const q     = (req.query.q || '').trim();
+    const cycle = String(req.query.cycle || 'active').toLowerCase();
+
+    const params = [supervisorId];
+    let where = `WHERE p.supervisor_id = ?`;
+
+    /* ----- cycle filter (default = current open cycle) ----- */
+    if (cycle === 'active') {
+      const activeId = await getActiveCycleId(); // already defined above in this file
+      if (activeId) {
+        where += ` AND p.cycle_id = ?`;
+        params.push(activeId);
+      }
+      // if no active cycle, we skip filtering so you still see something
+    } else if (cycle !== 'all' && /^\d+$/.test(cycle)) {
+      where += ` AND p.cycle_id = ?`;
+      params.push(Number(cycle));
+    }
+
+    /* ----- status filter ----- */
+    let statusFilter = '';
+    if (tab === 'archived') {
+      statusFilter = ` AND (p.is_archived = 1 OR p.status = 'archived')`;
+    } else if (tab === 'draft') {
+      statusFilter = ` AND COALESCE(p.is_archived,0) = 0 AND COALESCE(p.status,'draft') = 'draft'`;
+    } else {
+      // Active tab shows items you're working on (incl. drafts)
+      statusFilter = `
+        AND COALESCE(p.is_archived,0) = 0
+        AND COALESCE(p.status,'draft') IN ('draft','active','submitted','pending')
+      `;
+    }
+
+    /* ----- search ----- */
+    let search = '';
+    if (q) {
+      search = ` AND (
+        p.title LIKE ? OR p.topic LIKE ? OR p.description LIKE ? OR p.keywords LIKE ?
+      )`;
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+
+    /* ----- dedupe Student-Idea pool rows (keep latest per cycle) ----- */
+    const sql = `
+      SELECT *
+      FROM (
+        SELECT
+          p.project_id,
+          p.title,
+          p.topic,
+          p.description,
+          p.keywords,
+          p.quota,
+          p.spots_filled,
+          COALESCE(p.status,'draft') AS status,
+          p.approval_status,
+          COALESCE(p.is_archived,0)   AS is_archived,
+          p.is_student_pool,
+          p.cycle_id,
+          p.updated_at,
+          p.created_at,
+          -- rank rows within each (supervisor, cycle, is_student_pool) group
+          ROW_NUMBER() OVER (
+            PARTITION BY p.supervisor_id, p.cycle_id, COALESCE(p.is_student_pool,0)
+            ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
+          ) AS rn
+        FROM projects p
+        ${where}
+        ${statusFilter}
+        ${search}
+      ) t
+      -- keep all non-pool rows; for pool rows keep only the latest (rn=1)
+      WHERE (t.is_student_pool IS NULL OR t.is_student_pool = 0 OR t.rn = 1)
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC
+    `;
+
+    const [rows] = await db.query(sql, params);
+    res.json(rows || []);
+  } catch (e) {
+    console.error('getMyProjects error:', e);
+    res.status(500).json({ message: 'Failed to fetch projects' });
+  }
+};
+
+/* ---------------- Existing Handlers you shared ---------------- */
 
 // GET /supervisor (list supervisors)
 exports.listSupervisors = async (_req, res) => {
@@ -84,7 +222,8 @@ exports.getReceivedProposals = async (req, res) => {
   }
 };
 
-// PATCH /supervisor/proposals/:id/decision  { status: 'accepted'|'rejected'|'under_review', reason?: string }
+// PATCH /supervisor/proposals/:id/decision
+// { status: 'accepted'|'rejected'|'under_review', reason?: string }
 exports.decideProposal = async (req, res) => {
   let conn;
   try {
@@ -217,11 +356,9 @@ exports.decideProposal = async (req, res) => {
     console.error('decideProposal error:', e);
     res.status(500).json({ message: 'Failed to update proposal status' });
   } finally {
-    // Extra safety: if conn still hanging, release it
     if (conn) {
       try { await conn.rollback(); } catch (_) {}
       try { conn.release(); } catch (_) {}
     }
   }
 };
-

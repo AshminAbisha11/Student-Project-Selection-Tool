@@ -1,5 +1,6 @@
 // src/pages/SupervisorProposalsPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorNav from '../components/supervisorNav';
 import SupervisorProposalModal from '../components/supervisorProposalModal';
@@ -7,6 +8,8 @@ import './supervisorProposalPage.css';
 import './supervisorDashboardPage.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// If your server is mounted at /supervisor-list, set this to '/supervisor-list'
+const SUP_BASE = '/supervisor';
 
 /* ---------- JS-only full-bleed background (waves + soft glows) ---------- */
 function BgWaves({ src = '/assets/login_background.png' }) {
@@ -33,7 +36,7 @@ const norm = (s) => String(s || '').toLowerCase();
 
 /** Bucket proposals into Submitted / Accepted / Rejected */
 function categorize(list) {
-  const submittedSet = new Set(['submitted', 'pending', 'allocated']);
+  const submittedSet = new Set(['submitted', 'pending', 'allocated', 'under_review']);
   const acceptedSet  = new Set(['accepted']);
   const rejectedSet  = new Set(['rejected']);
 
@@ -141,7 +144,23 @@ export default function SupervisorProposalsPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [filter, setFilter]         = useState('submitted'); // default tab
 
+  const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const user  = (() => {
+    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
+    catch { return null; }
+  })();
+
+  // guard
+  useEffect(() => {
+    if (!token || !user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (String(user.role || '').toLowerCase() !== 'supervisor') {
+      navigate('/student-dashboard', { replace: true });
+    }
+  }, [navigate, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch proposals
   useEffect(() => {
@@ -150,7 +169,7 @@ export default function SupervisorProposalsPage() {
       try {
         setLoading(true);
         setError('');
-        const res = await fetch(`${API}/supervisor-list/proposals`, {
+        const res = await fetch(`${API}${SUP_BASE}/proposals`, {
           headers: { Authorization: token ? `Bearer ${token}` : '' },
           signal: ac.signal,
         });
@@ -184,7 +203,6 @@ export default function SupervisorProposalsPage() {
 
   return (
     <div className="sv-layout">
-      {/* full-bleed background */}
       <BgWaves src="/assets/login_background.png" />
 
       <SupervisorNav />

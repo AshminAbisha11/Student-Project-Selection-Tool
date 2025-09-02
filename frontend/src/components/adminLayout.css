@@ -1,0 +1,167 @@
+/* ============================
+   HARDENED ADMIN LAYOUT FIXES
+   + full-bleed header
+   ============================ */
+
+/* spacing token used by main + header */
+:root{
+  --main-pad: 32px;
+}
+
+/* Ensure the shell is a flex container with sidebar + main */
+.admin-shell{
+  display:flex !important;
+}
+
+/* Sidebar always looks like a sidebar */
+.as-sidebar{
+  width: 260px !important;
+  flex: 0 0 260px !important;
+  padding: 22px 18px !important;
+  background: rgba(255,255,255,.94) !important;
+  border-right: 1px solid var(--border) !important;
+  display:flex !important;
+  flex-direction:column !important;
+}
+
+/* Brand/logo never blows up */
+.as-brand{
+  width: 170px !important;
+  max-width: 170px !important;
+  height: auto !important;
+  display:block !important;
+  margin: 0 0 18px !important;
+}
+
+/* Nav is vertical and styled as buttons */
+.as-nav{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:10px !important;
+}
+.as-nav a,
+.as-nav .as-navlink{
+  display:flex !important;
+  align-items:center !important;
+  gap:12px !important;
+  padding: 12px 14px !important;
+  border-radius: 12px !important;
+  border: 1px solid transparent !important;
+  text-decoration:none !important;
+  color: var(--ink) !important;
+  font-weight:600 !important;
+}
+.as-nav a:hover,
+.as-nav .as-navlink:hover{
+  background: var(--hover) !important;
+  border-color: var(--border) !important;
+}
+.as-nav a.active,
+.as-nav .as-navlink.active{
+  background:#fff !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 2px 12px rgba(47,42,85,.06) !important;
+}
+
+/* Logout button looks like a nav item */
+.as-nav .as-navlink.danger{
+  color:#9b1c1c !important;
+}
+
+/* Main fills remaining space */
+.admin-main{
+  flex: 1 1 auto !important;
+  min-width: 0 !important;            /* prevents overflow issues */
+padding: 0 var(--main-pad) var(--main-pad) !important; /* top 0 */
+  box-sizing: border-box !important;
+}
+
+/* ---------- FULL-BLEED HEADER ---------- */
+.as-header{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+
+  /* extend header to cancel .admin-main side padding */
+  margin-left: calc(var(--main-pad) * -1) !important;
+  margin-right: calc(var(--main-pad) * -1) !important;
+
+  /* keep content aligned to main padding */
+  padding: 12px var(--main-pad) !important;
+
+  background: rgba(255,255,255,.92) !important;
+  border: 1px solid var(--border) !important;
+
+  /* flush against the sidebar on the left, rounded on the right */
+  border-left: 0 !important;
+  border-radius: 0 14px 14px 0 !important;
+
+  box-shadow: 0 10px 30px rgba(46,12,90,.08) !important;
+  margin-bottom: 16px !important;
+}
+.as-header__title{
+  margin:0 !important;
+  font-size:18px !important;
+  font-weight:800 !important;
+  color: var(--ink) !important;
+}
+
+/* User / avatar / menu */
+.as-user{
+  position: relative !important;      /* anchor the dropdown */
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  padding:6px 8px !important;
+  border-radius:12px !important;
+  border:1px solid transparent !important;
+  background:transparent !important;
+  cursor:pointer !important;
+}
+.as-avatar{
+  width:32px !important;
+  height:32px !important;
+  border-radius:999px !important;
+  display:inline-grid !important;
+  place-items:center !important;
+  font-weight:800 !important;
+  font-size:12px !important;
+  color:#fff !important;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2)) !important;
+  box-shadow: 0 0 0 4px rgba(111,53,200,.12) !important;
+}
+.as-menu{
+  position:absolute !important;
+  right:0 !important;
+  top: calc(100% + 8px) !important;
+  min-width:180px !important;
+  background:#fff !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  padding:6px !important;
+  box-shadow: 0 14px 36px rgba(47,42,85,.12) !important;
+}
+.as-menu__item{
+  display:block !important;
+  width:100% !important;
+  text-align:left !important;
+  padding:10px 12px !important;
+  border-radius:10px !important;
+  color: var(--ink) !important;
+  font-weight:600 !important;
+  text-decoration:none !important;
+  background:transparent !important;
+  border:0 !important;
+  cursor:pointer !important;
+}
+.as-menu__item:hover{ background: var(--hover) !important; }
+.as-menu__item.danger{ color:#9b1c1c !important; }
+.as-menu__item.danger:hover{ background:#fff0f1 !important; }
+
+/* ---------- Mobile tweaks ---------- */
+@media (max-width: 960px){
+  :root{ --main-pad: 18px; } /* tighter gutters on small screens */
+}

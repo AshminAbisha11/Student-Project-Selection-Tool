@@ -161,23 +161,48 @@ export default function AdminAllocationPage() {
     }
   };
 
-  const deleteCycle = async () => {
-    if (!status?.hasActiveCycle) return;
-    if (!window.confirm("Delete this cycle?")) return;
-    try {
-      await apiFetch(`/cycle/${status.cycle.cycle_id}`, { method: "DELETE" });
-      setOk("Cycle deleted.");
-      setStatus(null);
-      setForm({
-        name: "",
-        submission_open_at: "",
-        submission_close_at: "",
-        commit_at: "",
-      });
-    } catch (e) {
-      setErr(e.message);
+ const deleteCycle = async () => {
+  if (!status?.hasActiveCycle) return;
+
+  const id = status.cycle.cycle_id;
+  setErr(""); setOk("");
+
+  // 1) try a regular delete
+  try {
+    await apiFetch(`/cycle/${id}`, { method: "DELETE" });
+    setOk("Cycle deleted.");
+    setStatus(null);
+    setForm({ name: "", submission_open_at: "", submission_close_at: "", commit_at: "" });
+    return;
+  } catch (e) {
+    // 2) if backend says we must force, confirm and retry with ?force=1
+    const msg = (e?.message || "").toLowerCase();
+    if (msg.includes("pass ?force=1")) {
+      const yes = window.confirm(
+        "This cycle still has data (e.g., projects/allocations). " +
+        "Delete the cycle and remove all related data now?"
+      );
+      if (!yes) {
+        setErr("Deletion cancelled.");
+        return;
+      }
+      try {
+        await apiFetch(`/cycle/${id}?force=1`, { method: "DELETE" });
+        setOk("Cycle and related data deleted.");
+        setStatus(null);
+        setForm({ name: "", submission_open_at: "", submission_close_at: "", commit_at: "" });
+        return;
+      } catch (e2) {
+        setErr(e2.message || "Force delete failed");
+        return;
+      }
     }
-  };
+
+    // other errors
+    setErr(e.message || "Delete failed");
+  }
+};
+
 
   // Status actions
   const openNow = async () => {
