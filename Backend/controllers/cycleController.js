@@ -32,10 +32,10 @@ function assertValidStatus(status) {
 // GET /cycle/status
 exports.getStatus = async (_req, res) => {
   try {
+    // Return the most relevant cycle: prefer open, then draft, else latest closed/committed
     const [rows] = await db.query(`
       SELECT * FROM allocation_cycles
-      WHERE status IN ('open','draft')
-      ORDER BY status='open' DESC, cycle_id DESC
+      ORDER BY (status='open') DESC, (status='draft') DESC, cycle_id DESC
       LIMIT 1
     `);
 
@@ -53,8 +53,8 @@ exports.getStatus = async (_req, res) => {
       cycle,
       isSubmissionOpen,
       hasPassedDeadline,
-      secondsUntilClose: closeAt ? secondsBetween(now, closeAt) : 0,
-      secondsUntilCommit: cycle.commit_at ? secondsBetween(now, cycle.commit_at) : 0,
+      secondsUntilClose: closeAt ? Math.max(0, Math.floor((closeAt - now) / 1000)) : 0,
+      secondsUntilCommit: cycle.commit_at ? Math.max(0, Math.floor((new Date(cycle.commit_at) - now) / 1000)) : 0,
       canCommitNow: !!cycle.commit_at && now >= new Date(cycle.commit_at),
     });
   } catch (e) {
@@ -302,13 +302,12 @@ exports.closeNow = async (req, res) => {
 };
 
 // POST /cycle/:id/commit-now
+// POST /cycle/:id/commit-now
 exports.commitNow = async (req, res) => {
   try {
     const { id } = req.params;
-    await db.query(
-      `UPDATE allocation_cycles SET commit_at=NOW(), status='committed' WHERE cycle_id=?`,
-      [id]
-    );
+    // Only set commit time; don't flip status here
+    await db.query(`UPDATE allocation_cycles SET commit_at = NOW() WHERE cycle_id = ?`, [id]);
     res.json({ message: 'Commit time set to now' });
   } catch (e) {
     console.error('commitNow error:', e);
