@@ -1,0 +1,71 @@
+/* src/pages/adminCyclesPage.css */
+
+.ac-wrap { display: grid; gap: 18px; }
+
+.ac-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  justify-content: space-between;
+}
+.ac-toolbar .as-title { margin: 0; }
+.ac-toolbar-actions { display: flex; gap: 10px; }
+
+.ac-form .as-title { margin-top: 0; }
+
+.as-alert {
+  padding: 10px 12px; border-radius: 10px; margin: 8px 0 14px;
+  border: 1px solid transparent; font-weight: 600; font-size: 14px;
+}
+.as-alert--error { background:#fff1f3; color:#a11d3a; border-color:#f6c9d4; }
+.as-alert--ok { background:#f2fff8; color:#0e6243; border-color:#c9f5df; }
+
+.ac-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+}
+.ac-form-grid label { display: flex; flex-direction: column; gap: 6px; }
+.ac-form-grid input[type="text"],
+.ac-form-grid input[type="datetime-local"]{
+  height: 46px; border:1px solid #e8e3ff; background:#fbfaff;
+  border-radius: 12px; padding: 10px 12px; font: inherit;
+}
+.ac-open-now {
+  grid-column: 1 / -1;
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 6px; color: #4a3f69; font-weight: 600;
+}
+.ac-buttons { grid-column: 1 / -1; display: flex; gap: 10px; margin-top: 2px; }
+
+.ac-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ac-empty { padding: 8px 0; color: #6b6785; }
+
+.ac-table { width: 100%; display: grid; gap: 8px; }
+.ac-trow {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr 1fr .6fr 1.2fr;
+  gap: 10px; align-items: center;
+  padding: 10px 8px; border: 1px solid #eee7ff; border-radius: 12px;
+  background: #fff;
+}
+.ac-thead { font-weight: 800; background: transparent; border: 0; padding-bottom: 0; }
+.ac-name { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+
+.ac-badge {
+  background: #f2e9ff; color:#5b21b6; border:1px solid #e8ddff;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800;
+}
+
+.ac-status {
+  padding: 4px 10px; border-radius: 999px; font-weight: 800; font-size: 12px;
+  border: 1px solid transparent;
+}
+.ac-status--draft     { background:#f6f7ff; color:#464372; border-color:#e5e7ff; }
+.ac-status--open      { background:#edf7ff; color:#0b63ff; border-color:#cae7ff; }
+.ac-status--closed    { background:#fff6ed; color:#b45309; border-color:#ffe6c8; }
+.ac-status--committed { background:#ecfdf5; color:#065f46; border-color:#bcf0da; }
+
+.ac-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.ac-actions-col { text-align: right; }
+.as-btn.danger { border-color:#ffd6d6; color:#c01f1f; }

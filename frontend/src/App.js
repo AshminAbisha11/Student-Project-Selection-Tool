@@ -26,12 +26,14 @@ import SupervisorAllocatedStudentsPage from "./pages/supervisorAllocatedStudents
 // Support Pages
 import HelpSupportPage from "./pages/helpSupportPage";                 // student help
 import SupervisorHelpSupportPage from "./pages/supervisorHelpSupportPage"; // supervisor help
+import AdminHelpSupportPage from "./pages/adminHelpSupportPage";       // NEW: admin help
 
-// Admin Pages (SPLIT)
+// Admin Pages
 import AdminHomePage from "./pages/adminHomePage";
 import AdminAllocationsPage from "./pages/adminAllocationPage";
 import AdminSignupPage from "./pages/adminSignupPage";
 import AdminLoginPage from "./pages/adminLoginPage";
+import AdminCyclesPage from "./pages/adminCyclesPage"; // manage cycles (list/create/edit)
 
 // Settings Pages
 import ProfileSettingsPage from "./pages/supervisorProfileSettingsPage";
@@ -70,10 +72,14 @@ function logoutClient() {
 }
 function homeFor(role) {
   switch ((role || "").toLowerCase()) {
-    case "student": return "/student-dashboard";
-    case "supervisor": return "/supervisor-dashboard";
-    case "admin": return "/admin";
-    default: return "/login";
+    case "student":
+      return "/student-dashboard";
+    case "supervisor":
+      return "/supervisor-dashboard";
+    case "admin":
+      return "/admin";
+    default:
+      return "/login";
   }
 }
 function currentRole() {
@@ -151,7 +157,10 @@ function RootRedirect() {
 
 /** Shared Help route that auto-picks the right page for the logged-in role */
 function RoleSwitchHelp() {
-  return currentRole() === "supervisor" ? <SupervisorHelpSupportPage /> : <HelpSupportPage />;
+  const role = currentRole();
+  if (role === "admin") return <AdminHelpSupportPage />;
+  if (role === "supervisor") return <SupervisorHelpSupportPage />;
+  return <HelpSupportPage />;
 }
 
 function App() {
@@ -195,6 +204,46 @@ function App() {
             </ProtectedRoute>
           }
         />
+        {/* Manage Cycles (list/create/edit) */}
+        <Route
+          path="/admin/cycles"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AdminCyclesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/cycle/new"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AdminCyclesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/cycle/:id"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AdminCyclesPage />
+            </ProtectedRoute>
+          }
+        />
+        {/* Quick-action alias */}
+        <Route path="/admin/invite-admin" element={<AdminSignupPage />} />
+
+        {/* Admin help – dedicated routes */}
+        <Route
+          path="/admin/help-support"
+          element={
+            <ProtectedRoute roles={["admin"]}>
+              <AdminHelpSupportPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/admin/help" element={<Navigate to="/admin/help-support" replace />} />
+
+        {/* Legacy alias */}
         <Route path="/admin/dashboard" element={<Navigate to="/admin" replace />} />
 
         {/* Student Routes */}
@@ -286,11 +335,11 @@ function App() {
         />
         <Route path="/my-projects" element={<Navigate to="/supervisor/my-projects" replace />} />
 
-        {/* Help & Support */}
+        {/* Help & Support (role-switch; now supports admin too) */}
         <Route
           path="/help-support"
           element={
-            <ProtectedRoute roles={["student", "supervisor"]}>
+            <ProtectedRoute roles={["student", "supervisor", "admin"]}>
               <RoleSwitchHelp />
             </ProtectedRoute>
           }
@@ -304,7 +353,10 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/supervisor/help" element={<Navigate to="/supervisor/help-support" replace />} />
+        <Route
+          path="/supervisor/help"
+          element={<Navigate to="/supervisor/help-support" replace />}
+        />
 
         {/* Settings */}
         <Route
@@ -315,7 +367,14 @@ function App() {
             </ProtectedRoute>
           }
         />
-        {/* 👇 This line had the typo; fixed to element={ ... } */}
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute roles={["student", "supervisor", "admin"]}>
+              <ProfileSettingsPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/settings/password"
           element={
