@@ -30,26 +30,9 @@ async function cycleExists(id) {
   return r.length > 0;
 }
 
-/* New: open cycle if available, otherwise latest cycle this supervisor used */
+/* Open cycle if available, otherwise latest cycle this supervisor used */
 async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
-  const active = await getActiveCycleId();
-  if (active) return active;
-
-  const [[latestFromProjects]] = await db.query(
-    `SELECT p.cycle_id
-       FROM projects p
-      WHERE p.supervisor_id = ?
-        AND COALESCE(p.is_archived,0) = 0
-      ORDER BY COALESCE(p.updated_at, p.created_at) DESC
-      LIMIT 1`,
-    [supervisorId]
-  );
-  return latestFromProjects ? latestFromProjects.cycle_id : null;
-}
-
-// add this near your other helpers
-async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
-  // open cycle first
+  // Try open cycle first
   const [byStatus] = await db.query(
     `SELECT cycle_id FROM allocation_cycles
       WHERE status='open'
@@ -57,7 +40,7 @@ async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
   );
   if (byStatus.length) return byStatus[0].cycle_id;
 
-  // else: most recent cycle this supervisor actually used
+  // Else: most recent cycle this supervisor actually used
   const [[latestFromProjects]] = await db.query(
     `SELECT p.cycle_id
        FROM projects p
@@ -69,7 +52,6 @@ async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
   );
   return latestFromProjects ? latestFromProjects.cycle_id : null;
 }
-
 
 /* ---------------- Dashboard Overview ---------------- */
 // GET /supervisor/overview
@@ -133,23 +115,26 @@ exports.getMyProjects = async (req, res) => {
       if (chosenId) {
         where += ` AND p.cycle_id = ?`;
         params.push(chosenId);
-      } // else: no cycles -> return empty later
+      }
+      // if no chosenId -> no extra filter; will return empty after tab filter
     } else if (cycle !== 'all' && /^\d+$/.test(cycle)) {
       where += ` AND p.cycle_id = ?`;
       params.push(Number(cycle));
     }
+    // 'all' => no cycle_id predicate
 
-    /* ----- status filter ----- */
+    /* ----- status (tab) filter ----- */
+    // We don't have a projects.status column in schema, so:
+    // - archived: is_archived = 1
+    // - draft:    is_archived = 0 AND cycle_id IS NULL
+    // - active:   is_archived = 0 AND cycle_id IS NOT NULL
     let statusFilter = '';
     if (tab === 'archived') {
-      statusFilter = ` AND (p.is_archived = 1 OR p.status = 'archived')`;
+      statusFilter = ` AND p.is_archived = 1`;
     } else if (tab === 'draft') {
-      statusFilter = ` AND COALESCE(p.is_archived,0) = 0 AND COALESCE(p.status,'draft') = 'draft'`;
+      statusFilter = ` AND COALESCE(p.is_archived,0) = 0 AND p.cycle_id IS NULL`;
     } else {
-      statusFilter = `
-        AND COALESCE(p.is_archived,0) = 0
-        AND COALESCE(p.status,'draft') IN ('draft','active','submitted','pending')
-      `;
+      statusFilter = ` AND COALESCE(p.is_archived,0) = 0 AND p.cycle_id IS NOT NULL`;
     }
 
     /* ----- search ----- */
@@ -173,13 +158,13 @@ exports.getMyProjects = async (req, res) => {
           p.keywords,
           p.quota,
           p.spots_filled,
-          COALESCE(p.status,'draft') AS status,
           p.approval_status,
           COALESCE(p.is_archived,0)   AS is_archived,
           p.is_student_pool,
           p.cycle_id,
           p.updated_at,
           p.created_at,
+          GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
           ROW_NUMBER() OVER (
             PARTITION BY p.supervisor_id, p.cycle_id, COALESCE(p.is_student_pool,0)
             ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
@@ -190,10 +175,13 @@ exports.getMyProjects = async (req, res) => {
         ${search}
       ) t
       WHERE (t.is_student_pool IS NULL OR t.is_student_pool = 0 OR t.rn = 1)
-      ORDER BY COALESCE(t.updated_at, t.created_at) DESC
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC, t.project_id DESC
     `;
 
     const [rows] = await db.query(sql, params);
+
+    // If cycle tab was 'active/latest' and no active/latest cycle exists,
+    // and we also asked for draft/active filtering, rows could be empty – that's OK.
     res.json(rows || []);
   } catch (e) {
     console.error('getMyProjects error:', e);
