@@ -23,18 +23,61 @@ async function getActiveCycleId() {
 }
 
 async function cycleExists(id) {
-  const [r] = await db.query(`SELECT 1 FROM allocation_cycles WHERE cycle_id=? LIMIT 1`, [id]);
+  const [r] = await db.query(
+    `SELECT 1 FROM allocation_cycles WHERE cycle_id=? LIMIT 1`,
+    [id]
+  );
   return r.length > 0;
 }
 
-/* ---------------- NEW: Dashboard Overview ---------------- */
+/* New: open cycle if available, otherwise latest cycle this supervisor used */
+async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
+  const active = await getActiveCycleId();
+  if (active) return active;
+
+  const [[latestFromProjects]] = await db.query(
+    `SELECT p.cycle_id
+       FROM projects p
+      WHERE p.supervisor_id = ?
+        AND COALESCE(p.is_archived,0) = 0
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC
+      LIMIT 1`,
+    [supervisorId]
+  );
+  return latestFromProjects ? latestFromProjects.cycle_id : null;
+}
+
+// add this near your other helpers
+async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
+  // open cycle first
+  const [byStatus] = await db.query(
+    `SELECT cycle_id FROM allocation_cycles
+      WHERE status='open'
+      ORDER BY submission_open_at DESC LIMIT 1`
+  );
+  if (byStatus.length) return byStatus[0].cycle_id;
+
+  // else: most recent cycle this supervisor actually used
+  const [[latestFromProjects]] = await db.query(
+    `SELECT p.cycle_id
+       FROM projects p
+      WHERE p.supervisor_id = ?
+        AND COALESCE(p.is_archived,0) = 0
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC
+      LIMIT 1`,
+    [supervisorId]
+  );
+  return latestFromProjects ? latestFromProjects.cycle_id : null;
+}
+
+
+/* ---------------- Dashboard Overview ---------------- */
 // GET /supervisor/overview
 exports.getOverview = async (req, res) => {
   try {
     const supervisorId = req.user?.user_id;
     if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
 
-    // Projects (count non-archived regardless of status so drafts are included)
     const [[projRow]] = await db.query(
       `SELECT COUNT(*) AS projects
          FROM projects
@@ -43,7 +86,6 @@ exports.getOverview = async (req, res) => {
       [supervisorId]
     );
 
-    // Proposals pending review (submitted/pending/under_review)
     const [[propRow]] = await db.query(
       `SELECT COUNT(*) AS pendingProposals
          FROM proposals
@@ -52,7 +94,6 @@ exports.getOverview = async (req, res) => {
       [supervisorId]
     );
 
-    // Allocated students (distinct)
     const [[allocRow]] = await db.query(
       `SELECT COUNT(DISTINCT student_id) AS students
          FROM allocations
@@ -72,8 +113,7 @@ exports.getOverview = async (req, res) => {
   }
 };
 
-/* ---------------- NEW: My Projects listing ---------------- */
-// GET /supervisor/projects?tab=active|draft|archived&q=searchTerm
+/* ---------------- My Projects listing ---------------- */
 // GET /supervisor/projects?tab=active|draft|archived&cycle=active|all|<cycle_id>&q=...
 exports.getMyProjects = async (req, res) => {
   try {
@@ -87,14 +127,13 @@ exports.getMyProjects = async (req, res) => {
     const params = [supervisorId];
     let where = `WHERE p.supervisor_id = ?`;
 
-    /* ----- cycle filter (default = current open cycle) ----- */
-    if (cycle === 'active') {
-      const activeId = await getActiveCycleId(); // already defined above in this file
-      if (activeId) {
+    /* ----- cycle filter ----- */
+    if (cycle === 'active' || cycle === 'latest') {
+      const chosenId = await getActiveOrLatestCycleIdForSupervisor(supervisorId);
+      if (chosenId) {
         where += ` AND p.cycle_id = ?`;
-        params.push(activeId);
-      }
-      // if no active cycle, we skip filtering so you still see something
+        params.push(chosenId);
+      } // else: no cycles -> return empty later
     } else if (cycle !== 'all' && /^\d+$/.test(cycle)) {
       where += ` AND p.cycle_id = ?`;
       params.push(Number(cycle));
@@ -107,7 +146,6 @@ exports.getMyProjects = async (req, res) => {
     } else if (tab === 'draft') {
       statusFilter = ` AND COALESCE(p.is_archived,0) = 0 AND COALESCE(p.status,'draft') = 'draft'`;
     } else {
-      // Active tab shows items you're working on (incl. drafts)
       statusFilter = `
         AND COALESCE(p.is_archived,0) = 0
         AND COALESCE(p.status,'draft') IN ('draft','active','submitted','pending')
@@ -123,7 +161,7 @@ exports.getMyProjects = async (req, res) => {
       params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
     }
 
-    /* ----- dedupe Student-Idea pool rows (keep latest per cycle) ----- */
+    /* ----- de-dupe Student-Idea pool (keep latest per cycle) ----- */
     const sql = `
       SELECT *
       FROM (
@@ -142,7 +180,6 @@ exports.getMyProjects = async (req, res) => {
           p.cycle_id,
           p.updated_at,
           p.created_at,
-          -- rank rows within each (supervisor, cycle, is_student_pool) group
           ROW_NUMBER() OVER (
             PARTITION BY p.supervisor_id, p.cycle_id, COALESCE(p.is_student_pool,0)
             ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
@@ -152,7 +189,6 @@ exports.getMyProjects = async (req, res) => {
         ${statusFilter}
         ${search}
       ) t
-      -- keep all non-pool rows; for pool rows keep only the latest (rn=1)
       WHERE (t.is_student_pool IS NULL OR t.is_student_pool = 0 OR t.rn = 1)
       ORDER BY COALESCE(t.updated_at, t.created_at) DESC
     `;
@@ -165,7 +201,7 @@ exports.getMyProjects = async (req, res) => {
   }
 };
 
-/* ---------------- Existing Handlers you shared ---------------- */
+/* ---------------- Existing Handlers ---------------- */
 
 // GET /supervisor (list supervisors)
 exports.listSupervisors = async (_req, res) => {
@@ -222,8 +258,7 @@ exports.getReceivedProposals = async (req, res) => {
   }
 };
 
-// PATCH /supervisor/proposals/:id/decision
-// { status: 'accepted'|'rejected'|'under_review', reason?: string }
+// PATCH /supervisor/proposals/:id/decision  { status: 'accepted'|'rejected'|'under_review', reason?: string }
 exports.decideProposal = async (req, res) => {
   let conn;
   try {
