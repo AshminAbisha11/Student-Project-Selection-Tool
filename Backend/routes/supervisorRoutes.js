@@ -2,13 +2,13 @@
 const express = require('express');
 const router = express.Router();
 
-// If your middleware is a default export (module.exports = fn)
+// Auth middleware: supports either default or named export
 const auth = require('../middleware/authMiddleware');
-const verifyToken = auth?.verifyToken || auth; // supports default or named export
+const verifyToken = auth?.verifyToken || auth;
 
 const supervisorController = require('../controllers/supervisorController');
 
-// Sanity assertions (helpful during boot)
+// ---- Sanity checks on boot ----
 if (typeof verifyToken !== 'function') {
   throw new Error('verifyToken is not a function. Fix authMiddleware export/import.');
 }
@@ -16,9 +16,20 @@ if (!supervisorController) {
   throw new Error('Failed to load supervisorController.');
 }
 
-// Routes
-router.get('/', verifyToken, supervisorController.listSupervisors);
-router.get('/proposals', verifyToken, supervisorController.getReceivedProposals);
-router.patch('/proposals/:id/decision', verifyToken, supervisorController.decideProposal);
+// Apply auth to all supervisor routes
+router.use(verifyToken);
+
+// ---- Dashboard tiles ----
+router.get('/overview', supervisorController.getOverview);
+
+// ---- My Projects list (supports ?tab=active|draft|archived & ?q=search) ----
+router.get('/projects', supervisorController.getMyProjects);
+
+// ---- Directory of supervisors (optional) ----
+router.get('/', supervisorController.listSupervisors);
+
+// ---- Proposals ----
+router.get('/proposals', supervisorController.getReceivedProposals);
+router.patch('/proposals/:id/decision', supervisorController.decideProposal);
 
 module.exports = router;

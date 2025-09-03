@@ -62,17 +62,37 @@
   background: transparent;
   border: 1px solid transparent;
   cursor:pointer; text-align:left;
-  transition: background .15s ease, transform .06s ease, border-color .15s ease;
+  transition:
+    background .15s ease,
+    transform .06s ease,
+    border-color .15s ease,
+    opacity .12s ease;              /* for pressed transparency */
 }
 .as-navlink:hover{
   background: var(--hover);
   border-color: var(--border);
 }
 .as-navlink.active{
-  background:#fff;
+  background: linear-gradient(180deg,#fff,rgba(255,255,255,.92));
   border-color: var(--border);
-  box-shadow: 0 2px 12px rgba(47,42,85,.06);
+  box-shadow:
+    0 2px 12px rgba(47,42,85,.06),
+    0 0 0 2px rgba(111,53,200,.14) inset;  /* subtle brand ring */
 }
+/* Pressed effect — slightly transparent + tiny nudge */
+.as-navlink:active,
+.as-navlink.active:active,
+.as-navlink.danger:active{
+  opacity: .72;
+  transform: translateY(1px);
+}
+
+/* Keyboard focus */
+.as-navlink:focus-visible{
+  outline: 2px solid rgba(111,53,200,.45);
+  outline-offset: 2px;
+}
+
 .as-navlink .icon{
   width:18px; height:18px;
   display:inline-grid; place-items:center;
@@ -86,6 +106,12 @@
 .as-navlink.danger:hover{
   background:#fff0f1;
   border-color:#ffd6db;
+}
+.as-navlink.danger.active{
+  background:#fff;
+  box-shadow:
+    0 2px 12px rgba(47,42,85,.06),
+    0 0 0 2px rgba(180,35,24,.14) inset;
 }
 
 /* ====== Main area (FULL WIDTH) ====== */

@@ -60,7 +60,13 @@ async function cycleExists(cycleId) {
 }
 
 /** Resolve cycle to use: prefer req.body/query cycle_id, else active, else most recent. */
+// Prefer cycle resolved by middleware (afterDeadline) -> explicit cycle_id in
+// body/query -> active cycle -> most recent cycle.
 async function resolveCycleId(req) {
+  if (req.cycleId) {
+    return { cycleId: Number(req.cycleId), source: 'middleware' };
+  }
+
   const raw = req.body?.cycle_id ?? req.query?.cycle_id ?? null;
 
   if (raw != null && String(raw).trim() !== '') {
@@ -119,16 +125,35 @@ async function loadEligiblePreferences(conn, cycleId) {
 }
 
 // capacities are CYCLE-SCOPED
+// capacities are CYCLE-SCOPED
 async function loadCapacities(conn, cycleId) {
-  // Works whether the column is user_id or supervisor_id (users-only model)
-  const [supQuotaRows] = await conn.query(
-    `SELECT COALESCE(user_id, supervisor_id) AS supervisor_id, quota_total FROM supervisor_meta`
-  );
+  // 1) Read total quota per supervisor from supervisor_meta
+  let supQuotaRows = [];
+  try {
+    // Most schemas: column is supervisor_id
+    [supQuotaRows] = await conn.query(
+      `SELECT supervisor_id AS supervisor_id, quota_total FROM supervisor_meta`
+    );
+  } catch (e) {
+    if (e.code === 'ER_BAD_FIELD_ERROR') {
+      // Fallback schema: column is user_id
+      const [altRows] = await conn.query(
+        `SELECT user_id AS supervisor_id, quota_total FROM supervisor_meta`
+      );
+      supQuotaRows = altRows;
+    } else if (e.code === 'ER_NO_SUCH_TABLE') {
+      // No meta table: treat all quotas as 0
+      supQuotaRows = [];
+    } else {
+      throw e;
+    }
+  }
+
   const supervisorQuota = new Map(
-    supQuotaRows.map(r => [r.supervisor_id, Number(r.quota_total || 0)])
+    supQuotaRows.map(r => [Number(r.supervisor_id), Number(r.quota_total || 0)])
   );
 
-  // allocations COUNT in THIS cycle only
+  // 2) Count allocations per supervisor in THIS cycle
   const [supLoad] = await conn.query(
     `
     SELECT pr.supervisor_id, COUNT(*) AS c
@@ -139,12 +164,14 @@ async function loadCapacities(conn, cycleId) {
     `,
     [cycleId]
   );
+
   const supervisorAllocated = new Map(
-    supLoad.map(r => [r.supervisor_id, Number(r.c)])
+    supLoad.map(r => [Number(r.supervisor_id), Number(r.c)])
   );
 
   return { supervisorQuota, supervisorAllocated };
 }
+
 
 function rankBySubmissionWithinProject(prefs) {
   const byProject = new Map();
@@ -303,6 +330,15 @@ exports.commit = async (req, res) => {
 
       inserted++;
     }
+
+    // Mark the cycle as committed (final state) as part of the same transaction.
+    // We also set commit_at if it wasn't set earlier (COALESCE).
+    await conn.query(
+      `UPDATE allocation_cycles
+         SET status='committed', commit_at = COALESCE(commit_at, NOW())
+       WHERE cycle_id = ?`,
+      [cycleId]
+    );
 
     await conn.commit();
     return res.json({ message: 'Allocations committed', inserted, cycleId });

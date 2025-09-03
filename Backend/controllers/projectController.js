@@ -1,73 +1,176 @@
-// controllers/projectController.js
-const db = require('../config/db');
+  // controllers/projectController.js
+  const db = require('../config/db');
 
-/* -----------------------------
-   Helpers
------------------------------- */
-const STUDENT_IDEA_TOPIC_NAME = 'Student Proposal Ideas';
+  /* -----------------------------
+    Helpers
+  ------------------------------ */
+  const STUDENT_IDEA_TOPIC_NAME = 'Student Proposal Ideas';
 
-const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
-const isStudentIdeaTopic = (topic) =>
-  normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
+  const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
+  const isStudentIdeaTopic = (topic) =>
+    normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
 
-async function getActiveCycleId() {
-  const [byStatus] = await db.query(`
-    SELECT cycle_id FROM allocation_cycles
-    WHERE status='open'
-    ORDER BY submission_open_at DESC
+  async function getMostRecentCycleId() {
+  const [r] = await db.query(`
+    SELECT cycle_id
+    FROM allocation_cycles
+    ORDER BY submission_open_at DESC, cycle_id DESC
     LIMIT 1
   `);
-  if (byStatus.length) return byStatus[0].cycle_id;
-
-  const [byDate] = await db.query(`
-    SELECT cycle_id FROM allocation_cycles
-    WHERE NOW() BETWEEN submission_open_at AND submission_close_at
-    ORDER BY submission_open_at DESC
-    LIMIT 1
-  `);
-  return byDate.length ? byDate[0].cycle_id : null;
+  return r.length ? r[0].cycle_id : null;
 }
 
-const parseBool = (v, def = false) => {
-  if (v === undefined || v === null) return def;
-  const s = String(v).trim().toLowerCase();
-  return s === '1' || s === 'true' || s === 'yes';
+async function resolveSupervisorCycleFilter(req) {
+  const raw = (req.query.cycle ?? req.query.cycle_id ?? '').toString().trim().toLowerCase();
+  if (raw === 'all') return { cycleId: null, source: 'all' };      // no cycle filter
+  if (/^\d+$/.test(raw)) return { cycleId: Number(raw), source: 'request' };
+
+  // default: prefer open; else most recent
+  const open = await getOpenCycleId();
+  if (open) return { cycleId: open, source: 'open' };
+  const recent = await getMostRecentCycleId();
+  return { cycleId: recent, source: 'recent' };
+}
+
+
+  // Strictly "open" by status (what students should use)
+  async function getOpenCycleId() {
+    const [r] = await db.query(`
+      SELECT cycle_id
+      FROM allocation_cycles
+      WHERE status='open'
+      ORDER BY submission_open_at DESC
+      LIMIT 1
+    `);
+    return r.length ? r[0].cycle_id : null;
+  }
+
+  // "Active" is a bit looser (status open or current datetime in window)
+  async function getActiveCycleId() {
+    const [byStatus] = await db.query(`
+      SELECT cycle_id FROM allocation_cycles
+      WHERE status='open'
+      ORDER BY submission_open_at DESC
+      LIMIT 1
+    `);
+    if (byStatus.length) return byStatus[0].cycle_id;
+
+    const [byDate] = await db.query(`
+      SELECT cycle_id FROM allocation_cycles
+      WHERE NOW() BETWEEN submission_open_at AND submission_close_at
+      ORDER BY submission_open_at DESC
+      LIMIT 1
+    `);
+    return byDate.length ? byDate[0].cycle_id : null;
+  }
+
+  const parseBool = (v, def = false) => {
+    if (v === undefined || v === null) return def;
+    const s = String(v).trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes';
+  };
+
+  /* -------------------------------------------
+    Public browse columns/joins
+    - projects.supervisor_id -> users.user_id
+  -------------------------------------------- */
+  const baseColumns = `
+    p.project_id,
+    p.title,
+    p.description,
+    p.topic,
+    p.keywords,
+    p.quota,
+    p.spots_filled,
+    GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
+    p.approval_status,
+    p.is_student_proposal,
+    p.is_student_pool,
+    p.cycle_id,
+    p.created_at,
+    p.updated_at,
+    p.is_archived,
+
+    u.user_id AS supervisor_id,
+    COALESCE(u.name, p.supervisor_name)  AS supervisor_name,
+    u.email  AS supervisor_email
+  `;
+
+  const baseJoins = `
+    LEFT JOIN users u ON u.user_id = p.supervisor_id
+  `;
+
+  /* ========================================================
+  * PUBLIC / STUDENT BROWSE (only when a cycle is OPEN)
+  * ====================================================== */
+  exports.listForStudents = async (req, res) => {
+  try {
+    // strict: only 'open' status counts
+    const openCycleId = await getOpenCycleId();
+    if (!openCycleId) {
+      return res
+        .status(409)
+        .json({ message: 'Project browsing is not open yet. An allocation cycle must be OPEN.' });
+    }
+
+    const {
+      supervisor = '',
+      topic = '',
+      keyword = '',
+      limit = '200',
+      offset = '0',
+    } = req.query;
+
+    // WHERE clauses & params
+    const clauses = [
+      'p.cycle_id = ?',
+      'p.is_archived = 0',
+      "LOWER(TRIM(p.approval_status)) = 'approved'",
+    ];
+    const params = [openCycleId];
+
+    if (supervisor.trim()) {
+      clauses.push('LOWER(TRIM(COALESCE(u.name, p.supervisor_name))) LIKE LOWER(TRIM(?))');
+      params.push(`%${supervisor}%`);
+    }
+    if (topic.trim()) {
+      clauses.push('LOWER(TRIM(p.topic)) LIKE LOWER(TRIM(?))');
+      params.push(`%${topic}%`);
+    }
+    if (keyword.trim()) {
+      const k = `%${keyword}%`;
+      clauses.push('(p.keywords LIKE ? OR p.title LIKE ? OR p.description LIKE ?)');
+      params.push(k, k, k);
+    }
+
+    const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 200));
+    const off = Math.max(0, parseInt(offset, 10) || 0);
+
+    const [rows] = await db.query(
+      `
+      SELECT ${baseColumns}
+      FROM projects p
+      ${baseJoins}
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY p.created_at DESC, p.project_id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...params, lim, off]
+    );
+
+    res.json({
+      cycle_id: openCycleId,
+      count: rows?.length || 0,
+      projects: rows || [],
+    });
+  } catch (error) {
+    console.error('listForStudents error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
-
-/* -------------------------------------------
-   Public browse columns/joins
-   - projects.supervisor_id -> users.user_id
--------------------------------------------- */
-const baseColumns = `
-  p.project_id,
-  p.title,
-  p.description,
-  p.topic,
-  p.keywords,
-  p.quota,
-  p.spots_filled,
-  GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
-  p.approval_status,
-  p.is_student_proposal,
-  p.is_student_pool,
-  p.cycle_id,
-  p.created_at,
-  p.updated_at,
-  p.is_archived,
-
-  u.user_id AS supervisor_id,
-  COALESCE(u.name, p.supervisor_name)  AS supervisor_name,
-  u.email  AS supervisor_email
-`;
-
-const baseJoins = `
-  LEFT JOIN users u ON u.user_id = p.supervisor_id
-`;
-
 /* ========================================================
- * PUBLIC / BROWSE  (archived hidden by default)
+ * PUBLIC / SEARCH (admin/dev use; not cycle-gated)
  * ====================================================== */
-
 exports.getAllProjects = async (_req, res) => {
   try {
     const [rows] = await db.query(
@@ -273,14 +376,22 @@ exports.getMyProjects = async (req, res) => {
   const supervisorId = req.user?.user_id;
   if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
 
+  // archived filter: 0|1|all (default 0)
   const archivedParam = (req.query.archived || '').toString().toLowerCase();
   let where = 'WHERE p.supervisor_id = ?';
   const params = [supervisorId];
 
   if (archivedParam !== 'all') {
-    const archived = parseBool(archivedParam, false) ? 1 : 0;
+    const archived = archivedParam === '1' || archivedParam === 'true';
     where += ' AND p.is_archived = ?';
-    params.push(archived);
+    params.push(archived ? 1 : 0);
+  }
+
+  // cycle filter: open|<id>|all|(fallback to most recent)
+  const { cycleId, source } = await resolveSupervisorCycleFilter(req);
+  if (cycleId != null) {
+    where += ' AND p.cycle_id = ?';
+    params.push(cycleId);
   }
 
   try {
@@ -309,12 +420,21 @@ exports.getMyProjects = async (req, res) => {
       params
     );
 
-    res.json(rows ?? []);
+    res.json({
+      meta: {
+        cycle_filter: cycleId,      // null means "all"
+        cycle_source: source,       // 'open' | 'recent' | 'request' | 'all'
+        archived: archivedParam || '0',
+        count: rows?.length || 0
+      },
+      projects: rows ?? []
+    });
   } catch (err) {
     console.error('getMyProjects error:', err);
     res.status(500).json({ message: 'Database error' });
   }
 };
+
 
 exports.getMyProjectById = async (req, res) => {
   const supervisorId = req.user?.user_id;
@@ -483,7 +603,7 @@ exports.createProject = async (req, res) => {
       quota,
       full_description = null,
       prerequisites = null,
-      cycle_id: cycleIdFromBody = null,   // allow explicit cycle
+      cycle_id: cycleIdFromBody = null,     // optional
     } = req.body || {};
 
     const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -496,20 +616,26 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
     }
 
-    // Decide cycle_id for ALL projects (not only student-pool)
-    let cycleId = cycleIdFromBody ? Number(cycleIdFromBody) : null;
-    if (!cycleId) {
-      cycleId = await getActiveCycleId();
+    // Decide cycle_id for ALL projects (may be NULL if no open cycle)
+    let cycleId = null;
+    if (cycleIdFromBody !== null && String(cycleIdFromBody).trim() !== '') {
+      const parsed = Number(cycleIdFromBody);
+      if (Number.isInteger(parsed) && parsed > 0) cycleId = parsed;
     }
     if (!cycleId) {
-      return res.status(409).json({ message: 'No active allocation cycle. Open a cycle or pass cycle_id.' });
+      // If there is an active cycle, attach to it; otherwise leave NULL (draft)
+      try {
+        const active = await getActiveCycleId();
+        if (active) cycleId = active;
+      } catch {
+        cycleId = null;
+      }
     }
 
-    // users-only: supervisor is the logged-in user
     const supervisor_id   = req.user.user_id;
     const supervisor_name = req.user.name || '';
 
-    const isStudentPool = isStudentIdeaTopic(topic);
+    const isStudentPool = isStudentIdeaTopic ? isStudentIdeaTopic(topic) : false;
 
     const conn = await db.getConnection();
     try {
@@ -531,9 +657,9 @@ exports.createProject = async (req, res) => {
           topic ? String(topic).trim() : null,
           keywords ? String(keywords).trim() : null,
           q,
-          supervisor_id,                 // users.user_id
+          supervisor_id,
           isStudentPool ? 1 : 0,
-          cycleId,
+          cycleId,                         // may be NULL (draft)
         ]
       );
 
@@ -565,9 +691,15 @@ exports.createProject = async (req, res) => {
         [project_id]
       );
 
-      return res.status(201).json({ message: 'Project created.', project });
+      const drafted = project.cycle_id == null;
+      return res.status(201).json({
+        message: drafted
+          ? 'Project created as a draft (no active cycle). It will appear to students once a cycle is opened.'
+          : 'Project created and attached to the active cycle.',
+        project,
+      });
     } catch (txErr) {
-      await conn.rollback();
+      try { await conn.rollback(); } catch {}
       throw txErr;
     } finally {
       conn.release();

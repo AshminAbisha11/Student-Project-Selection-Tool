@@ -6,7 +6,9 @@ import ProfileDropdown from '../components/profileDropdown';
 import SupervisorNav from '../components/supervisorNav';
 import './supervisorDashboardPage.css';
 
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// If your server is mounted at /supervisor-list, change this to '/supervisor-list'
+const SUP_BASE = '/supervisor';
 
 function getNameFromToken() {
   try {
@@ -28,7 +30,7 @@ export default function SupervisorDashboardPage() {
   const [overview, setOverview] = useState({
     projects: 0,
     pendingProposals: 0,
-    allocatedStudents: 0,
+    studentsAllocated: 0, // <-- match controller key
   });
 
   // Memoize token & user so they don't change identity each render
@@ -57,38 +59,38 @@ export default function SupervisorDashboardPage() {
   }, [navigate, token, user, userRole]);
 
   // load dashboard overview
+  const loadOverview = async (abortSignal) => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}${SUP_BASE}/overview`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: abortSignal,
+      });
+      setOverview({
+        projects: Number(data.projects || 0),
+        pendingProposals: Number(data.pendingProposals || 0),
+        studentsAllocated: Number(data.studentsAllocated || 0), // <-- fixed
+      });
+    } catch (err) {
+      if (!abortSignal?.aborted) {
+        console.warn('Overview load failed:', err?.response?.data || err.message);
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          localStorage.clear();
+          navigate('/login', { replace: true });
+        }
+      }
+    } finally {
+      if (!abortSignal?.aborted) setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!token || !userId) return;
-
     const controller = new AbortController();
-
-    (async () => {
-      try {
-        setLoading(true);
-        const { data } = await axios.get(`${API}/supervisor/overview`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: controller.signal,
-        });
-        setOverview({
-          projects: Number(data.projects || 0),
-          pendingProposals: Number(data.pendingProposals || 0),
-          allocatedStudents: Number(data.allocatedStudents || 0),
-        });
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          console.warn('Overview load failed:', err?.response?.data || err.message);
-          if (err.response?.status === 401 || err.response?.status === 403) {
-            localStorage.clear();
-            navigate('/login', { replace: true });
-          }
-        }
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    })();
-
+    loadOverview(controller.signal);
     return () => controller.abort();
-  }, [token, userId, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, userId]);
 
   return (
     <div
@@ -121,7 +123,7 @@ export default function SupervisorDashboardPage() {
             <p>Projects Created</p>
           </div>
 
-        <div
+          <div
             className="dashboard-card"
             onClick={() => navigate('/supervisor/received-proposals')}
             style={{ cursor: 'pointer' }}
@@ -139,7 +141,7 @@ export default function SupervisorDashboardPage() {
             aria-label="View allocated students"
             title="View Allocated Students"
           >
-            <h4>{loading ? '—' : overview.allocatedStudents}</h4>
+            <h4>{loading ? '—' : overview.studentsAllocated}</h4>
             <p>Students Allocated</p>
           </div>
         </div>
@@ -165,10 +167,20 @@ export default function SupervisorDashboardPage() {
             >
               My Projects
             </button>
+
+            <button
+              className="btn btn-outline"
+              onClick={() => loadOverview()}
+              disabled={loading}
+              title="Refresh overview"
+              style={{ marginLeft: 8 }}
+            >
+              Refresh
+            </button>
           </div>
         </div>
 
-        {/* NEW: Account & Settings (after Quick Actions) */}
+        {/* Account & Settings */}
         <section className="dashboard-settings">
           <h4>Account &amp; Settings</h4>
           <div className="settings-grid">
@@ -195,7 +207,6 @@ export default function SupervisorDashboardPage() {
               </div>
               <span className="settings-cta" aria-hidden>Update →</span>
             </button>
-
 
             <button
               className="settings-card"

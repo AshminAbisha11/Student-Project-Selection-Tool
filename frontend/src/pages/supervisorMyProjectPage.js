@@ -7,6 +7,8 @@ import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorProjectEditModal from '../components/supervisorProjectEditModal';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// If your backend is mounted at /supervisor-list, change this to '/supervisor-list'
+const SUP_BASE = '/supervisor';
 
 const chipClass = (status) => {
   switch ((status || '').toLowerCase()) {
@@ -56,9 +58,11 @@ export default function MyProjectsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API}/projects/my?archived=${showArchived ? 1 : 0}`, {
-        headers: authHeaders,
-      });
+      const tab = showArchived ? 'archived' : 'active'; // controller includes drafts under 'active'
+      const res = await fetch(
+        `${API}${SUP_BASE}/projects?tab=${tab}&cycle=active`,
+        { headers: authHeaders }
+      );
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setProjects(Array.isArray(data) ? data : []);
@@ -143,11 +147,9 @@ export default function MyProjectsPage() {
         backgroundPosition: 'center',
       }}
     >
-      {/* Fixed left sidebar + fixed top header */}
       <SupervisorNav />
       <SupervisorHeader />
 
-      {/* Main content area offset by the fixed header + sidebar (handled by CSS) */}
       <main className="sv-main">
         <section className="myproj-panel">
           <div className="page-inner">
@@ -203,9 +205,14 @@ export default function MyProjectsPage() {
                         <span className={chipClass(p.approval_status)}>
                           {String(p.approval_status || '').toUpperCase() || 'STATUS'}
                         </span>
-                        {p.is_student_proposal ? (
+
+                        {/* student proposal pool chip */}
+                        {(Number(p.is_student_pool) === 1 ||
+                          /student proposal/i.test(`${p.title || ''} ${p.topic || ''}`)
+                        ) && (
                           <span className="chip chip--ghost">Student Proposal</span>
-                        ) : null}
+                        )}
+
                         {Number(p.is_archived) === 1 ? (
                           <span className="chip chip--archived">Archived</span>
                         ) : null}
@@ -282,7 +289,6 @@ export default function MyProjectsPage() {
           </div>
         </section>
 
-        {/* Edit Modal */}
         {editId && (
           <SupervisorProjectEditModal
             projectId={editId}

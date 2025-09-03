@@ -1,0 +1,191 @@
+/* ================================
+   Admin Help & Support — clean layout
+   ================================ */
+
+/* Two-column layout; header spans both columns */
+.ahs-layout{
+  display:grid;
+  grid-template-columns: 1fr 360px;
+  gap:20px;
+  align-items:start;
+}
+
+@media (max-width:1100px){
+  .ahs-layout{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Header (compact, no blank area) */
+.ahs-head{
+  grid-column: 1 / -1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:16px 20px;
+}
+.ahs-head h1{ margin:0; }
+.ahs-head .ahs-actions{ display:flex; gap:10px; flex-wrap:wrap; }
+
+/* --- FAQ (left column) --- */
+.ahs-faq{ padding:16px 18px; }
+
+.ahs-accordion{
+  list-style:none;
+  margin:0;
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.faq{
+  background:#fff;
+  border:1px solid var(--stroke, #e9e6ff);
+  border-radius:12px;
+  overflow:hidden;
+}
+
+.faq-head{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px 14px;
+  background:#faf9ff;
+  border:0;
+  font-weight:800;
+  color:var(--ink, #1f1630);
+  text-align:left;
+  cursor:pointer;
+}
+.faq-head .chev{
+  transition: transform .18s ease;
+  opacity:.7;
+}
+.faq.open .faq-head .chev{ transform: rotate(90deg); }
+
+.faq-body{
+  display:none;
+  padding:12px 14px;
+  color:var(--muted, #736c8f);
+  line-height:1.55;
+}
+.faq.open .faq-body{ display:block; }
+
+.ahs-faq a{
+  color: var(--brand, #5b21b6);
+  font-weight:700;
+  text-decoration:none;
+}
+.ahs-faq a:hover{ text-decoration:underline; }
+
+/* --- Right sidebar (sticky) --- */
+.ahs-right{
+  position:sticky;
+  top:16px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+@media (max-width:1100px){
+  .ahs-right{ position:static; }
+}
+
+.ahs-card{ padding:16px 18px; }
+
+/* Quick actions in the sidebar */
+.ahs-quick-list{
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:10px;
+}
+
+.ahx{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 14px;
+  background: linear-gradient(135deg, rgba(111,53,200,.08), rgba(138,84,255,.08));
+  border:1px solid var(--stroke, #e9e6ff);
+  border-radius:10px;
+  font-weight:800;
+  color: var(--ink, #1f1630);
+  cursor:pointer;
+}
+.ahx:hover{ filter:brightness(.98); }
+.ahx:disabled{ opacity:.6; cursor:not-allowed; }
+.ahx::after{
+  content:"›";
+  opacity:.6;
+  margin-left:12px;
+}
+
+/* Simple link & list styles in sidebar cards */
+.ahs-links, .ahs-list{ margin:0; padding-left:18px; }
+.ahs-links li + li, .ahs-list li + li{ margin-top:6px; }
+
+/* Kill any inherited min-heights from generic cards */
+.as-card{ min-height:auto !important; }
+
+/* =========================================================
+   ENLARGED FAQ SECTION (feature feel)
+   ========================================================= */
+.ahs-faq--xl{
+  padding:22px 22px;
+  border-radius:16px;
+  border:1px solid var(--stroke, #e9e6ff);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfaff 100%);
+  box-shadow: 0 20px 40px rgba(31,22,48,.08);
+}
+
+.ahs-faq--xl .as-title{
+  font-size: clamp(18px, 2.1vw, 22px);
+  margin:0 0 14px;
+}
+
+.ahs-faq--xl .ahs-accordion{ gap:14px; }
+
+.ahs-faq--xl .faq{
+  border-radius:14px;
+  border:1px solid #e6ddff;
+  box-shadow: 0 8px 22px rgba(91,33,182,.06);
+}
+
+.ahs-faq--xl .faq-head{
+  padding:16px 18px;
+  min-height:56px;
+  font-size:16px;
+  background:#f8f7ff;
+}
+.ahs-faq--xl .faq-head:hover{ background:#f5f2ff; }
+
+.ahs-faq--xl .faq-head .chev{
+  font-size:18px;
+  opacity:.65;
+  transition: transform .2s ease, opacity .2s ease;
+}
+.ahs-faq--xl .faq.open .faq-head .chev{
+  transform: rotate(90deg);
+  opacity:.9;
+}
+
+.ahs-faq--xl .faq-body{
+  padding:14px 18px 18px;
+  font-size:15px;
+  line-height:1.65;
+  color: var(--muted, #736c8f);
+  background:#fff;
+}
+.ahs-faq--xl .faq-body a{
+  color: var(--brand, #5b21b6);
+  font-weight:700;
+  text-decoration:none;
+}
+.ahs-faq--xl .faq-body a:hover{ text-decoration:underline; }
+
+/* If you ever want the FAQ to span full width, uncomment:
+   .ahs-faq--xl{ grid-column: 1 / -1; }
+*/
