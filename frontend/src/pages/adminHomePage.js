@@ -22,7 +22,7 @@ const fmt = (d) =>
 export default function AdminHomePage() {
   const navigate = useNavigate();
 
-  /** ---------- user & avatar initials ---------- */
+  // -------- user & initials
   const user = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "{}");
@@ -37,30 +37,24 @@ export default function AdminHomePage() {
     .join("")
     .toUpperCase();
 
-  /** ---------- auth headers ---------- */
-  const token = localStorage.getItem("token");
-  const authHeaders = useMemo(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token]
-  );
-
-  /** ---------- state ---------- */
+  // -------- state
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [cycle, setCycle] = useState(null); // { id, name, opensAt, closesAt, status, isSubmissionOpen, hasPassedDeadline }
+  const [cycle, setCycle] = useState(null); // { id,name,opensAt,closesAt,commitAt,status,isSubmissionOpen,hasPassedDeadline,canCommitNow }
   const [actionBusy, setActionBusy] = useState(false);
-
   const alive = useRef(true);
 
-  /** ---------- load current cycle status ---------- */
+  // -------- load current cycle status
   const loadStatus = useCallback(async () => {
     setLoading(true);
     setErr("");
     const controller = new AbortController();
     try {
+      const token = localStorage.getItem("token") || "";
       const res = await fetch(`${API}${CYCLE_STATUS_PATH}`, {
-        headers: authHeaders,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         signal: controller.signal,
+        cache: "no-store",
       });
 
       if (res.status === 401 || res.status === 403) {
@@ -71,24 +65,24 @@ export default function AdminHomePage() {
       }
 
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(payload?.message || "Failed to load cycle status");
-      }
+      if (!res.ok) throw new Error(payload?.message || "Failed to load cycle status");
 
-      if (!payload.hasActiveCycle) {
-        if (!alive.current) return;
+      const c = payload?.cycle;
+      if (!alive.current) return;
+
+      if (!c) {
         setCycle(null);
       } else {
-        const c = payload.cycle || {};
-        if (!alive.current) return;
         setCycle({
           id: c.cycle_id,
           name: c.name || "Unnamed cycle",
           opensAt: toDate(c.submission_open_at),
           closesAt: toDate(c.submission_close_at),
-          status: c.status, // 'draft' | 'open' | 'closed' | 'committed'
+          commitAt: toDate(c.commit_at),
+          status: String(c.status || "").toLowerCase(), // 'draft'|'open'|'closed'|'committed'
           isSubmissionOpen: !!payload.isSubmissionOpen,
           hasPassedDeadline: !!payload.hasPassedDeadline,
+          canCommitNow: !!payload.canCommitNow,
         });
       }
     } catch (e) {
@@ -97,14 +91,11 @@ export default function AdminHomePage() {
     } finally {
       if (alive.current) setLoading(false);
     }
-    return () => controller.abort();
-  }, [authHeaders]);
+  }, []);
 
   useEffect(() => {
     alive.current = true;
     loadStatus();
-
-    // Auto-refresh every 60s
     const t = setInterval(loadStatus, 60_000);
     return () => {
       alive.current = false;
@@ -112,105 +103,131 @@ export default function AdminHomePage() {
     };
   }, [loadStatus]);
 
-  /** ---------- POST actions (open / close / commit) ---------- */
-  async function postAction(path) {
+  // -------- POST helpers (read token fresh each call)
+  async function postAction(path, method = "POST") {
     setActionBusy(true);
     setErr("");
     try {
+      const token = localStorage.getItem("token") || "";
       const res = await fetch(`${API}${path}`, {
-        method: "POST",
-        headers: { ...authHeaders, "Content-Type": "application/json" },
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        cache: "no-store",
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.message || "Action failed");
-      }
+      if (!res.ok) throw new Error(data?.message || "Action failed");
       await loadStatus();
+      return data;
     } catch (e) {
       setErr(e.message || "Action failed");
+      throw e;
     } finally {
       setActionBusy(false);
     }
   }
 
-  /** ---------- status pills ---------- */
+  // -------- status pills
   const statusBadge = useMemo(() => {
     if (!cycle) return null;
-    switch (cycle.status) {
-      case "open":
-        if (cycle.isSubmissionOpen && !cycle.hasPassedDeadline) {
-          return (
-            <>
-              <span className="ah-pill ok">Submissions OPEN</span>
-              <span className="ah-pill ok">Before deadline</span>
-            </>
-          );
-        }
-        if (cycle.hasPassedDeadline) {
-          return <span className="ah-pill">Past deadline</span>;
-        }
-        return <span className="ah-pill">Open</span>;
-      case "draft":
-        return <span className="ah-pill">Draft</span>;
-      case "closed":
-        return <span className="ah-pill">Closed</span>;
-      case "committed":
-        return <span className="ah-pill">Committed</span>;
-      default:
-        return null;
+    const pills = [];
+    if (cycle.status === "open") {
+      pills.push(
+        <span key="sub" className={`ah-pill ${cycle.isSubmissionOpen ? "ok" : ""}`}>
+          {cycle.isSubmissionOpen ? "Submissions OPEN" : "Open"}
+        </span>
+      );
+      pills.push(
+        <span key="deadline" className={`ah-pill ${cycle.hasPassedDeadline ? "" : "ok"}`}>
+          {cycle.hasPassedDeadline ? "Past deadline" : "Before deadline"}
+        </span>
+      );
+    } else {
+      pills.push(<span key="state" className="ah-pill">{cycle.status}</span>);
     }
+    if (cycle.canCommitNow) {
+      pills.push(
+        <span key="commit" className="ah-pill ok">
+          Ready to commit
+        </span>
+      );
+    }
+    return <>{pills}</>;
   }, [cycle]);
 
-  /** ---------- contextual quick actions ---------- */
+  // -------- quick actions (contextual)
   const quickActions = useMemo(() => {
-    if (actionBusy) {
-      return [{ label: "Working…", onClick: () => {}, disabled: true }];
-    }
+    if (actionBusy) return [{ label: "Working…", onClick: () => {}, disabled: true }];
+
     if (!cycle) {
       return [
-        { label: "Create first cycle", onClick: () => navigate("/admin/cycles") },
+        { label: "Create first cycle", onClick: () => navigate("/admin/allocations") },
+        { label: "Manage cycles", onClick: () => navigate("/admin/cycles") },
         { label: "Invite an admin", onClick: () => navigate("/admin/invite-admin") },
-        { label: "Admin help & docs", onClick: () => navigate("/admin/help-support") },
       ];
     }
+
     if (cycle.status === "draft") {
       return [
-        { label: "Open cycle now", onClick: () => postAction(`/cycle/${cycle.id}/open`) },
+        { label: "Start cycle now", onClick: () => postAction(`/cycle/${cycle.id}/open?now=1`) },
         { label: "Edit dates", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
         { label: "Invite students & supervisors", onClick: () => navigate("/admin/invite-admin") },
       ];
     }
+
     if (cycle.status === "open") {
       if (cycle.hasPassedDeadline) {
         return [
-          { label: "Close submissions now", onClick: () => postAction(`/cycle/${cycle.id}/close`) },
-          { label: "Run allocation", onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }) },
-          { label: "Manage projects", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
+          { label: "Close submissions now", onClick: () => postAction(`/cycle/${cycle.id}/close?now=1`) },
+          {
+            label: "Go to Allocation run",
+            onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }),
+          },
+          { label: "Manage cycle dates", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
         ];
       }
-      // before deadline
       return [
-        { label: "View submissions", onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }) },
-        { label: "Close submissions now", onClick: () => postAction(`/cycle/${cycle.id}/close`) },
-        { label: "Manage projects", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
+        {
+          label: "View submissions",
+          onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }),
+        },
+        { label: "Close submissions now", onClick: () => postAction(`/cycle/${cycle.id}/close?now=1`) },
+        { label: "Manage cycle dates", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
       ];
     }
+
     if (cycle.status === "closed") {
       return [
-        { label: "Run allocation", onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }) },
-        { label: "Re-open cycle", onClick: () => postAction(`/cycle/${cycle.id}/open`) },
-        { label: "Edit dates", onClick: () => navigate(`/admin/cycles?edit=${cycle.id}`) },
+        {
+          label: "Run allocation",
+          onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }),
+        },
+        {
+          label: "Set commit time to now",
+          onClick: async () => {
+            await postAction(`/cycle/${cycle.id}/commit-now`);
+            // optional: jump straight to allocation page
+            navigate(`/admin/allocations`, { state: { cycleId: cycle.id } });
+          },
+        },
+        { label: "Re-open cycle", onClick: () => postAction(`/cycle/${cycle.id}/open?now=1`) },
       ];
     }
+
     // committed
     return [
-      { label: "View results", onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }) },
+      {
+        label: "View results",
+        onClick: () => navigate(`/admin/allocations`, { state: { cycleId: cycle.id } }),
+      },
       { label: "Start a new cycle", onClick: () => navigate("/admin/cycles") },
       { label: "Admin help & docs", onClick: () => navigate("/admin/help-support") },
     ];
   }, [cycle, actionBusy, navigate]);
 
-  /** ---------- render ---------- */
+  // -------- render
   return (
     <AdminLayout>
       <div className="ah-grid">
@@ -225,16 +242,10 @@ export default function AdminHomePage() {
             </div>
             <div className="hero-spacer" />
             <div className="ah-actions">
-              <button
-                className="as-btn as-btn--ghost"
-                onClick={() => navigate("/change-password")}
-              >
+              <button className="as-btn as-btn--ghost" onClick={() => navigate("/change-password")}>
                 Change password
               </button>
-              <button
-                className="as-btn as-btn--primary"
-                onClick={() => navigate("/settings/profile")}
-              >
+              <button className="as-btn as-btn--primary" onClick={() => navigate("/settings/profile")}>
                 Profile settings
               </button>
             </div>
@@ -258,28 +269,19 @@ export default function AdminHomePage() {
                 <button className="as-btn as-btn--ghost" onClick={loadStatus}>
                   Retry
                 </button>
-                <button
-                  className="as-btn as-btn--primary"
-                  onClick={() => navigate("/admin-login")}
-                >
+                <button className="as-btn as-btn--primary" onClick={() => navigate("/admin-login")}>
                   Log in
                 </button>
               </div>
             </div>
           ) : !cycle ? (
             <div className="ah-empty">
-              <p>No active cycle.</p>
+              <p>No cycle configured yet.</p>
               <div className="ah-actions">
-                <button
-                  className="as-btn as-btn--primary"
-                  onClick={() => navigate("/admin/cycles")}
-                >
+                <button className="as-btn as-btn--primary" onClick={() => navigate("/admin/cycles")}>
                   Create first cycle
                 </button>
-                <button
-                  className="as-btn as-btn--ghost"
-                  onClick={() => navigate("/admin/cycles")}
-                >
+                <button className="as-btn as-btn--ghost" onClick={() => navigate("/admin/cycles")}>
                   Manage cycles
                 </button>
               </div>
@@ -300,6 +302,10 @@ export default function AdminHomePage() {
                   <dd>{fmt(cycle.closesAt)}</dd>
                 </div>
                 <div className="row">
+                  <dt>Commit</dt>
+                  <dd>{fmt(cycle.commitAt)}</dd>
+                </div>
+                <div className="row">
                   <dt>Status</dt>
                   <dd>{statusBadge}</dd>
                 </div>
@@ -308,18 +314,14 @@ export default function AdminHomePage() {
               <div className="ah-actions">
                 <button
                   className="as-btn as-btn--primary"
-                  onClick={() =>
-                    navigate("/admin/allocations", { state: { cycleId: cycle.id } })
-                  }
+                  onClick={() => navigate("/admin/allocations", { state: { cycleId: cycle.id } })}
                 >
                   Go to Allocation run
                 </button>
                 <button
                   className="as-btn as-btn--ghost"
                   onClick={() =>
-                    navigate(
-                      cycle?.id ? `/admin/cycles?edit=${cycle.id}` : "/admin/cycles"
-                    )
+                    navigate(cycle?.id ? `/admin/cycles?edit=${cycle.id}` : "/admin/cycles")
                   }
                 >
                   Manage cycles

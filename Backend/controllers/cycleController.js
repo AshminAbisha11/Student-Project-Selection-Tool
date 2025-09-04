@@ -3,13 +3,6 @@ const db = require('../config/db');
 const { toSqlDate } = require('../utils/dateUtil');
 
 /* ---------------- Helpers ---------------- */
-function secondsBetween(a, b) {
-  if (!a || !b) return 0;
-  const A = new Date(a).getTime();
-  const B = new Date(b).getTime();
-  if (Number.isNaN(A) || Number.isNaN(B)) return 0;
-  return Math.max(0, Math.floor((B - A) / 1000));
-}
 function toSqlOrNull(v) {
   if (v === undefined) return undefined;
   if (v === null) return null;
@@ -29,33 +22,83 @@ function assertValidStatus(status) {
 }
 
 /* ---------------- READ ---------------- */
+
+// GET /cycle/active
+exports.getActive = async (_req, res) => {
+  try {
+    const [[row]] = await db.query(`
+      SELECT *
+      FROM allocation_cycles
+      WHERE status='open'
+      ORDER BY submission_open_at DESC
+      LIMIT 1
+    `);
+    res.json(row || null);
+  } catch (e) {
+    console.error('getActive error:', e);
+    res.status(500).json({ message: 'Failed to fetch active cycle' });
+  }
+};
+
 // GET /cycle/status
+// Choose the “most relevant” cycle for dashboards (open > draft > latest created)
+// and compute smart flags for banners & buttons.
 exports.getStatus = async (_req, res) => {
   try {
-    // Return the most relevant cycle: prefer open, then draft, else latest closed/committed
     const [rows] = await db.query(`
-      SELECT * FROM allocation_cycles
+      SELECT *
+      FROM allocation_cycles
       ORDER BY (status='open') DESC, (status='draft') DESC, cycle_id DESC
       LIMIT 1
     `);
 
-    if (!rows.length) return res.json({ hasActiveCycle: false });
+    const [[openRow]] = await db.query(`
+      SELECT *
+      FROM allocation_cycles
+      WHERE status='open'
+      ORDER BY submission_open_at DESC
+      LIMIT 1
+    `);
+
+    if (!rows.length) {
+      return res.json({
+        hasAnyCycle: false,
+        hasActiveCycle: false,
+        cycle: null,
+        isSubmissionOpen: false,
+        hasPassedDeadline: false,
+        secondsUntilClose: 0,
+        secondsUntilCommit: 0,
+        canCommitNow: false,
+      });
+    }
 
     const cycle = rows[0];
     const now = new Date();
 
-    const closeAt = cycle.submission_close_at ? new Date(cycle.submission_close_at) : null;
-    const isSubmissionOpen = cycle.status === 'open' && closeAt && now < closeAt;
+    const closeAt =
+      cycle.submission_close_at ? new Date(cycle.submission_close_at) : null;
+    const commitAt =
+      cycle.commit_at ? new Date(cycle.commit_at) : null;
+
+    const isOpen = cycle.status === 'open';
+    const isSubmissionOpen = isOpen && !!closeAt && now < closeAt;
     const hasPassedDeadline = !!closeAt && now >= closeAt;
 
+    // You can "Commit Now" when:
+    // - we are not in the open submission window, AND
+    // - either there is no commit_at (immediate), or we are past commit_at, or we are past the submission deadline.
+    const canCommitNow = !isOpen && (hasPassedDeadline || !commitAt || now >= commitAt);
+
     res.json({
-      hasActiveCycle: true,
+      hasAnyCycle: true,
+      hasActiveCycle: !!openRow,
       cycle,
       isSubmissionOpen,
       hasPassedDeadline,
-      secondsUntilClose: closeAt ? Math.max(0, Math.floor((closeAt - now) / 1000)) : 0,
-      secondsUntilCommit: cycle.commit_at ? Math.max(0, Math.floor((new Date(cycle.commit_at) - now) / 1000)) : 0,
-      canCommitNow: !!cycle.commit_at && now >= new Date(cycle.commit_at),
+      secondsUntilClose: closeAt && now < closeAt ? Math.floor((closeAt - now) / 1000) : 0,
+      secondsUntilCommit: commitAt && now < commitAt ? Math.floor((commitAt - now) / 1000) : 0,
+      canCommitNow,
     });
   } catch (e) {
     console.error('getStatus error:', e);
@@ -67,7 +110,8 @@ exports.getStatus = async (_req, res) => {
 exports.list = async (_req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT * FROM allocation_cycles
+      SELECT *
+      FROM allocation_cycles
       ORDER BY submission_open_at DESC
     `);
     res.json(rows);
@@ -78,6 +122,7 @@ exports.list = async (_req, res) => {
 };
 
 /* ---------------- WRITE ---------------- */
+
 // POST /cycle
 exports.create = async (req, res) => {
   try {
@@ -106,8 +151,12 @@ exports.create = async (req, res) => {
     if (sqlCommit && sqlCommit < sqlClose)
       return res.status(400).json({ message: 'Commit must be on/after close' });
 
+    // Enforce uniqueness: at most one open / one committed cycle at a time
     if (status === 'open') {
       await db.query(`UPDATE allocation_cycles SET status='closed' WHERE status='open'`);
+    }
+    if (status === 'committed') {
+      await db.query(`UPDATE allocation_cycles SET status='closed' WHERE status='committed'`);
     }
 
     const [ins] = await db.query(
@@ -147,12 +196,12 @@ exports.update = async (req, res) => {
     );
     if (!current) return res.status(404).json({ message: 'Cycle not found' });
 
-    const sqlOpen = toSqlOrNull(submission_open_at);
-    const sqlClose = toSqlOrNull(submission_close_at);
+    const sqlOpen   = toSqlOrNull(submission_open_at);
+    const sqlClose  = toSqlOrNull(submission_close_at);
     const sqlCommit = toSqlOrNull(commit_at);
 
-    const nextOpen = sqlOpen !== undefined ? sqlOpen : current.submission_open_at;
-    const nextClose = sqlClose !== undefined ? sqlClose : current.submission_close_at;
+    const nextOpen   = sqlOpen   !== undefined ? sqlOpen   : current.submission_open_at;
+    const nextClose  = sqlClose  !== undefined ? sqlClose  : current.submission_close_at;
     const nextCommit = sqlCommit !== undefined ? sqlCommit : current.commit_at;
 
     if (nextClose <= nextOpen)
@@ -161,18 +210,25 @@ exports.update = async (req, res) => {
       return res.status(400).json({ message: 'Commit must be on/after close' });
 
     const fields = [], vals = [];
-    if (name !== undefined) { fields.push('name=?'); vals.push(name); }
-    if (sqlOpen !== undefined) { fields.push('submission_open_at=?'); vals.push(sqlOpen); }
-    if (sqlClose !== undefined) { fields.push('submission_close_at=?'); vals.push(sqlClose); }
-    if (sqlCommit !== undefined) { fields.push('commit_at=?'); vals.push(sqlCommit); }
-    if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+    if (name   !== undefined) { fields.push('name=?'); vals.push(name); }
+    if (sqlOpen   !== undefined) { fields.push('submission_open_at=?');  vals.push(sqlOpen); }
+    if (sqlClose  !== undefined) { fields.push('submission_close_at=?'); vals.push(sqlClose); }
+    if (sqlCommit !== undefined) { fields.push('commit_at=?');           vals.push(sqlCommit); }
+    if (status    !== undefined) { fields.push('status=?');              vals.push(status); }
 
     if (!fields.length)
       return res.status(400).json({ message: 'No fields to update' });
 
+    // Enforce uniqueness for open/committed
     if (status === 'open') {
       await db.query(
         `UPDATE allocation_cycles SET status='closed' WHERE status='open' AND cycle_id<>?`,
+        [id]
+      );
+    }
+    if (status === 'committed') {
+      await db.query(
+        `UPDATE allocation_cycles SET status='closed' WHERE status='committed' AND cycle_id<>?`,
         [id]
       );
     }
@@ -195,8 +251,7 @@ exports.update = async (req, res) => {
 };
 
 // POST /cycle/:id/open
-// Auto-seed projects from the latest previous cycle into this cycle
-// POST /cycle/:id/open
+// Open the cycle now and seed projects from last cycle + drafts.
 exports.openNow = async (req, res) => {
   let conn;
   try {
@@ -214,7 +269,7 @@ exports.openNow = async (req, res) => {
       [cycleId]
     );
 
-    // 2) Open this one now
+    // 2) Open this one now (ensure open timestamp reflects the action)
     await conn.query(
       `UPDATE allocation_cycles
          SET status='open', submission_open_at = NOW()
@@ -222,7 +277,7 @@ exports.openNow = async (req, res) => {
       [cycleId]
     );
 
-    // 3) Most recent previous cycle (if any)
+    // 3) Seed projects from the most recent previous cycle (if any)
     const [prevRows] = await conn.query(
       `SELECT cycle_id
          FROM allocation_cycles
@@ -232,42 +287,20 @@ exports.openNow = async (req, res) => {
       [cycleId]
     );
 
-    /* ----------------------------
-       Seed from previous cycle
-       ---------------------------- */
     if (prevRows.length) {
       const prevId = prevRows[0].cycle_id;
 
-      // (3a) Insert projects from previous cycle (approved, not archived)
+      // (3a) Copy approved, non-archived projects (avoid duplicates by supervisor+title per cycle)
       await conn.query(
         `
         INSERT INTO projects (
-          title,
-          description,
-          supervisor_id,
-          supervisor_name,
-          cycle_id,
-          quota,
-          spots_filled,
-          approval_status,
-          is_student_pool,
-          is_archived,
-          topic,
-          keywords
+          title, description, supervisor_id, supervisor_name, cycle_id,
+          quota, spots_filled, approval_status, is_student_pool, is_archived, topic, keywords
         )
         SELECT
-          src.title,
-          src.description,
-          src.supervisor_id,
-          COALESCE(src.supervisor_name, ''),
+          src.title, src.description, src.supervisor_id, COALESCE(src.supervisor_name, ''),
           ? AS cycle_id,
-          src.quota,
-          0 AS spots_filled,
-          src.approval_status,
-          src.is_student_pool,
-          0 AS is_archived,
-          src.topic,
-          src.keywords
+          src.quota, 0, src.approval_status, src.is_student_pool, 0, src.topic, src.keywords
         FROM projects src
         LEFT JOIN projects dst
           ON  dst.supervisor_id = src.supervisor_id
@@ -281,7 +314,7 @@ exports.openNow = async (req, res) => {
         [cycleId, cycleId, prevId]
       );
 
-      // (3b) Copy project_details for those newly-created rows that came from prev cycle
+      // (3b) Copy project_details for newly created rows
       await conn.query(
         `
         INSERT INTO project_details (project_id, full_description, prerequisites)
@@ -293,7 +326,7 @@ exports.openNow = async (req, res) => {
         JOIN projects src
           ON  src.supervisor_id = dst.supervisor_id
           AND src.title         = dst.title
-         AND src.cycle_id       = ?
+          AND src.cycle_id      = ?
         LEFT JOIN project_details det
           ON det.project_id     = src.project_id
         LEFT JOIN project_details already
@@ -305,40 +338,17 @@ exports.openNow = async (req, res) => {
       );
     }
 
-    /* ----------------------------
-       Seed from "drafts" (cycle_id IS NULL)
-       ---------------------------- */
-
-    // (4a) Insert projects created without a cycle (drafts)
+    // 4) Seed from “draft” projects (where cycle_id IS NULL)
     await conn.query(
       `
       INSERT INTO projects (
-        title,
-        description,
-        supervisor_id,
-        supervisor_name,
-        cycle_id,
-        quota,
-        spots_filled,
-        approval_status,
-        is_student_pool,
-        is_archived,
-        topic,
-        keywords
+        title, description, supervisor_id, supervisor_name, cycle_id,
+        quota, spots_filled, approval_status, is_student_pool, is_archived, topic, keywords
       )
       SELECT
-        src.title,
-        src.description,
-        src.supervisor_id,
-        COALESCE(src.supervisor_name, ''),
+        src.title, src.description, src.supervisor_id, COALESCE(src.supervisor_name, ''),
         ? AS cycle_id,
-        src.quota,
-        0 AS spots_filled,
-        src.approval_status,
-        src.is_student_pool,
-        0 AS is_archived,
-        src.topic,
-        src.keywords
+        src.quota, 0, src.approval_status, src.is_student_pool, 0, src.topic, src.keywords
       FROM projects src
       LEFT JOIN projects dst
         ON  dst.supervisor_id = src.supervisor_id
@@ -352,7 +362,6 @@ exports.openNow = async (req, res) => {
       [cycleId, cycleId]
     );
 
-    // (4b) Copy project_details for newly-created rows that came from drafts (src.cycle_id IS NULL)
     await conn.query(
       `
       INSERT INTO project_details (project_id, full_description, prerequisites)
@@ -364,7 +373,7 @@ exports.openNow = async (req, res) => {
       JOIN projects src
         ON  src.supervisor_id = dst.supervisor_id
         AND src.title         = dst.title
-       AND src.cycle_id       IS NULL
+        AND src.cycle_id      IS NULL
       LEFT JOIN project_details det
         ON det.project_id     = src.project_id
       LEFT JOIN project_details already
@@ -404,16 +413,33 @@ exports.closeNow = async (req, res) => {
 };
 
 // POST /cycle/:id/commit-now
-// POST /cycle/:id/commit-now
+// Mark the cycle as committed WITHOUT running the allocator.
+// Ensures only one committed cycle at a time and back-fills close time if missing.
 exports.commitNow = async (req, res) => {
+  const { id } = req.params;
   try {
-    const { id } = req.params;
-    // Only set commit time; don't flip status here
-    await db.query(`UPDATE allocation_cycles SET commit_at = NOW() WHERE cycle_id = ?`, [id]);
-    res.json({ message: 'Commit time set to now' });
+    // Demote any previously committed cycles
+    await db.query(
+      `UPDATE allocation_cycles
+         SET status='closed'
+       WHERE status='committed' AND cycle_id <> ?`,
+      [id]
+    );
+
+    // Mark this cycle as committed and stamp times
+    await db.query(
+      `UPDATE allocation_cycles
+          SET status='committed',
+              submission_close_at = COALESCE(submission_close_at, NOW()),
+              commit_at = NOW()
+        WHERE cycle_id = ?`,
+      [id]
+    );
+
+    res.json({ message: 'Cycle marked as committed' });
   } catch (e) {
     console.error('commitNow error:', e);
-    res.status(500).json({ message: 'Failed to set commit time' });
+    res.status(500).json({ message: 'Failed to set commit' });
   }
 };
 

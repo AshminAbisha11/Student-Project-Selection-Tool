@@ -4,7 +4,7 @@ const db = require('../config/db'); // mysql2/promise pool
 // ---------------- Config (tweakable weights) ----------------
 const WEIGHTS = {
   preferencePoints: { 1: 100, 2: 80, 3: 60, 4: 40, 5: 20 },
-  contactedBonus: { Yes: 20, No: 0 },
+  contactedBonus: { Yes: 50, No: 0 },
   timing: { maxStart: 30, perProjectStep: 3 },
 };
 
@@ -51,6 +51,17 @@ async function getActiveCycleId() {
   return byDate.length ? byDate[0].cycle_id : null;
 }
 
+async function getLatestCommittedCycleId(connOrPool = db) {
+  const [r] = await connOrPool.query(
+    `SELECT cycle_id
+       FROM allocation_cycles
+      WHERE status='committed'
+      ORDER BY commit_at DESC, cycle_id DESC
+      LIMIT 1`
+  );
+  return r.length ? r[0].cycle_id : null;
+}
+
 async function cycleExists(cycleId) {
   const [r] = await db.query(
     `SELECT 1 FROM allocation_cycles WHERE cycle_id = ? LIMIT 1`,
@@ -59,9 +70,7 @@ async function cycleExists(cycleId) {
   return r.length > 0;
 }
 
-/** Resolve cycle to use: prefer req.body/query cycle_id, else active, else most recent. */
-// Prefer cycle resolved by middleware (afterDeadline) -> explicit cycle_id in
-// body/query -> active cycle -> most recent cycle.
+/** Resolve cycle to use: prefer middleware > explicit cycle_id > active > most recent. */
 async function resolveCycleId(req) {
   if (req.cycleId) {
     return { cycleId: Number(req.cycleId), source: 'middleware' };
@@ -125,24 +134,20 @@ async function loadEligiblePreferences(conn, cycleId) {
 }
 
 // capacities are CYCLE-SCOPED
-// capacities are CYCLE-SCOPED
 async function loadCapacities(conn, cycleId) {
   // 1) Read total quota per supervisor from supervisor_meta
   let supQuotaRows = [];
   try {
-    // Most schemas: column is supervisor_id
     [supQuotaRows] = await conn.query(
       `SELECT supervisor_id AS supervisor_id, quota_total FROM supervisor_meta`
     );
   } catch (e) {
     if (e.code === 'ER_BAD_FIELD_ERROR') {
-      // Fallback schema: column is user_id
       const [altRows] = await conn.query(
         `SELECT user_id AS supervisor_id, quota_total FROM supervisor_meta`
       );
       supQuotaRows = altRows;
     } else if (e.code === 'ER_NO_SUCH_TABLE') {
-      // No meta table: treat all quotas as 0
       supQuotaRows = [];
     } else {
       throw e;
@@ -171,7 +176,6 @@ async function loadCapacities(conn, cycleId) {
 
   return { supervisorQuota, supervisorAllocated };
 }
-
 
 function rankBySubmissionWithinProject(prefs) {
   const byProject = new Map();
@@ -242,6 +246,7 @@ exports.preview = async (req, res) => {
 
     let prefs = await loadEligiblePreferences(db, cycleId);
     if (!prefs.length) {
+      res.set('Cache-Control', 'no-store');
       return res.json({
         allocations: [],
         meta: { reason: 'no-eligible-preferences', cycleId },
@@ -260,6 +265,7 @@ exports.preview = async (req, res) => {
       await loadCapacities(db, cycleId)
     );
 
+    res.set('Cache-Control', 'no-store');
     return res.json({
       allocations: selected,
       meta: {
@@ -275,6 +281,22 @@ exports.preview = async (req, res) => {
     return res.status(500).json({ error: 'Allocator preview failed' });
   }
 };
+
+// helper: insert one allocation, return 1 if inserted, 0 if duplicate
+async function tryInsertAllocation(conn, a, cycleId) {
+  try {
+    const [ins] = await conn.query(
+      `INSERT INTO allocations
+         (student_id, project_id, supervisor_id, score, status, allocated_at, cycle_id, preference_id)
+       VALUES (?, ?, ?, ?, 'allocated', NOW(), ?, ?)`,
+      [a.student_id, a.project_id, a.supervisor_id, a.score, cycleId, a.preference_id]
+    );
+    return ins.affectedRows === 1 ? 1 : 0;
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return 0; // already has an allocation this cycle
+    throw e;
+  }
+}
 
 // ---------------- Commit (transactional writes) ----------------
 exports.commit = async (req, res) => {
@@ -299,28 +321,17 @@ exports.commit = async (req, res) => {
 
     let inserted = 0;
     for (const a of toCommit) {
+      // double-check student hasn't been allocated in THIS cycle
       const [s] = await conn.query(
         `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
         [a.student_id, cycleId]
       );
       if (s.length) continue;
 
-      await conn.query(
-        `INSERT INTO allocations
-          (student_id, project_id, supervisor_id, score, status, allocated_at, cycle_id, preference_id)
-         VALUES (?, ?, ?, ?, 'allocated', NOW(), ?, ?)
-         ON DUPLICATE KEY UPDATE score=VALUES(score)`,
-        [
-          a.student_id,
-          a.project_id,
-          a.supervisor_id,
-          a.score,
-          cycleId,
-          a.preference_id,
-        ]
-      );
+      const didInsert = await tryInsertAllocation(conn, a, cycleId);
+      if (!didInsert) continue;
 
-      // keep spots_filled in sync
+      // keep spots_filled in sync only when we actually inserted
       await conn.query(
         `UPDATE projects
            SET spots_filled = LEAST(spots_filled + 1, quota)
@@ -328,19 +339,21 @@ exports.commit = async (req, res) => {
         [a.project_id]
       );
 
-      inserted++;
+      inserted += 1;
     }
 
-    // Mark the cycle as committed (final state) as part of the same transaction.
-    // We also set commit_at if it wasn't set earlier (COALESCE).
+    // Mark the cycle as committed (and back-fill close/commit timestamps if needed)
     await conn.query(
       `UPDATE allocation_cycles
-         SET status='committed', commit_at = COALESCE(commit_at, NOW())
+         SET status='committed',
+             submission_close_at = COALESCE(submission_close_at, NOW()),
+             commit_at            = COALESCE(commit_at, NOW())
        WHERE cycle_id = ?`,
       [cycleId]
     );
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Allocations committed', inserted, cycleId });
   } catch (err) {
     if (conn) try { await conn.rollback(); } catch {}
@@ -353,7 +366,7 @@ exports.commit = async (req, res) => {
   }
 };
 
-// ---------------- Manual allocate (updated: cycle-aware) ----------------
+// ---------------- Manual allocate (cycle-aware) ----------------
 exports.allocate = async (req, res) => {
   const supervisorId = req.user.user_id;
   const { project_id, student_id, cycle_id } = req.body;
@@ -364,7 +377,6 @@ exports.allocate = async (req, res) => {
 
   let conn;
   try {
-    // respect provided cycle_id; else resolve
     const { cycleId } = cycle_id
       ? { cycleId: Number(cycle_id) }
       : await resolveCycleId(req);
@@ -372,7 +384,6 @@ exports.allocate = async (req, res) => {
     conn = await db.getConnection();
     await conn.beginTransaction();
 
-    // prevent dup in this cycle
     const [existsStudent] = await conn.query(
       `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
       [student_id, cycleId]
@@ -404,6 +415,7 @@ exports.allocate = async (req, res) => {
     );
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.status(201).json({ message: 'Student allocated successfully', cycle_id: cycleId });
   } catch (err) {
     if (conn) try { await conn.rollback(); } catch {}
@@ -416,7 +428,7 @@ exports.allocate = async (req, res) => {
   }
 };
 
-// ---------------- Manual deallocate (existing flow, kept) ----------------
+// ---------------- Manual deallocate ----------------
 exports.deallocate = async (req, res) => {
   const supervisorId = req.user.user_id;
   const { allocation_id } = req.params;
@@ -440,6 +452,7 @@ exports.deallocate = async (req, res) => {
     );
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Allocation removed' });
   } catch (err) {
     await conn.rollback();
@@ -449,7 +462,7 @@ exports.deallocate = async (req, res) => {
   }
 };
 
-// ---------------- Accept a Student-Idea Proposal (users-only; cycle-aware) ----------------
+// ---------------- Accept a Student-Idea Proposal (cycle-aware) ----------------
 exports.acceptStudentIdea = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { proposal_id } = req.body;
@@ -548,6 +561,7 @@ exports.acceptStudentIdea = async (req, res) => {
     );
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Proposal accepted and allocated.', allocation_id: ins.insertId });
   } catch (err) {
     try { await conn.rollback(); } catch {}
@@ -566,7 +580,18 @@ exports.listForSupervisor = async (req, res) => {
     const sid = req.user.user_id;
     const rawCycle = req.query.cycle_id;
     const hasCycle = rawCycle !== undefined && String(rawCycle).trim() !== '';
-    const cycleId = hasCycle ? Number(rawCycle) : null;
+
+    // default to latest committed cycle when none is specified
+    let cycleId = null;
+    if (hasCycle) {
+      cycleId = Number(rawCycle);
+    } else {
+      cycleId = await getLatestCommittedCycleId();
+      if (!cycleId) {
+        res.set('Cache-Control', 'no-store');
+        return res.json([]); // nothing committed yet
+      }
+    }
 
     const sql = `
       SELECT
@@ -600,12 +625,12 @@ exports.listForSupervisor = async (req, res) => {
       LEFT JOIN proposals pr ON pr.proposal_id = a.proposal_id
       WHERE a.supervisor_id = ?
         AND a.status = 'allocated'
-      ${hasCycle ? 'AND a.cycle_id = ?' : ''}
+        AND a.cycle_id = ?
       ORDER BY a.allocated_at DESC, a.allocation_id DESC
     `;
 
-    const params = hasCycle ? [sid, cycleId] : [sid];
-    const [rows] = await db.query(sql, params);
+    const [rows] = await db.query(sql, [sid, cycleId]);
+    res.set('Cache-Control', 'no-store');
     res.json(rows);
   } catch (e) {
     console.error('listForSupervisor error:', e);
@@ -657,6 +682,7 @@ exports.getOne = async (req, res) => {
     );
 
     if (!rows.length) return res.status(404).json({ message: 'Allocation not found' });
+    res.set('Cache-Control', 'no-store');
     res.json(rows[0]);
   } catch (e) {
     console.error('getOne error:', e);
@@ -664,37 +690,59 @@ exports.getOne = async (req, res) => {
   }
 };
 
-// ---------------- Student: get my allocation ----------------
+// ---------------- Student: get my allocation (latest committed cycle) ----------------
+// Student: get my allocation (prefer latest committed cycle; fallback to any cycle)
 exports.myAllocationForStudent = async (req, res) => {
   try {
     const sid = req.user.user_id;
 
-    const [rows] = await db.query(
-      `SELECT
-         a.allocation_id,
-         a.status              AS allocation_status,
-         a.allocated_at,
-         a.cycle_id,
-
-         a.project_id,
-         p.title               AS project_title,
-         p.description         AS project_description,
-         p.topic               AS project_topic,
-         p.supervisor_id,
-
-         s.name                AS supervisor_name,
-         s.email               AS supervisor_email
-       FROM allocations a
-       JOIN projects p ON p.project_id = a.project_id
-       JOIN users s    ON s.user_id = p.supervisor_id
-       WHERE a.student_id = ?
-       ORDER BY a.allocated_at DESC
-       LIMIT 1`,
+    // 1) Latest committed cycle allocation for this student
+    const [committed] = await db.query(
+      `
+      SELECT
+        a.allocation_id, a.status AS allocation_status, a.allocated_at, a.cycle_id,
+        a.project_id,
+        p.title AS project_title, p.description AS project_description, p.topic AS project_topic,
+        p.supervisor_id,
+        s.name AS supervisor_name, s.email AS supervisor_email
+      FROM allocations a
+      JOIN projects p          ON p.project_id = a.project_id
+      JOIN users s             ON s.user_id     = p.supervisor_id
+      JOIN allocation_cycles c ON c.cycle_id    = a.cycle_id
+      WHERE a.student_id = ?
+        AND c.status = 'committed'
+      ORDER BY c.commit_at DESC, a.allocated_at DESC, a.allocation_id DESC
+      LIMIT 1
+      `,
       [sid]
     );
 
-    if (!rows.length) return res.json(null);
-    res.json(rows[0]);
+    if (committed.length) {
+      res.set('Cache-Control', 'no-store');
+      return res.json(committed[0]);
+    }
+
+    // 2) Fallback: most recent allocation across any cycle
+    const [anyCycle] = await db.query(
+      `
+      SELECT
+        a.allocation_id, a.status AS allocation_status, a.allocated_at, a.cycle_id,
+        a.project_id,
+        p.title AS project_title, p.description AS project_description, p.topic AS project_topic,
+        p.supervisor_id,
+        s.name AS supervisor_name, s.email AS supervisor_email
+      FROM allocations a
+      JOIN projects p ON p.project_id = a.project_id
+      JOIN users s    ON s.user_id     = p.supervisor_id
+      WHERE a.student_id = ?
+      ORDER BY a.allocated_at DESC, a.allocation_id DESC
+      LIMIT 1
+      `,
+      [sid]
+    );
+
+    res.set('Cache-Control', 'no-store');
+    return res.json(anyCycle.length ? anyCycle[0] : null);
   } catch (e) {
     console.error('myAllocationForStudent error:', e);
     res.status(500).json({ message: 'Failed to load student allocation' });

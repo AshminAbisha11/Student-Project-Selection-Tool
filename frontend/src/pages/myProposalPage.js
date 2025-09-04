@@ -5,6 +5,7 @@ import './myProposalPage.css';
 
 import Sidebar from '../components/sideBar';
 import HeaderBar from '../components/headerBar';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -19,6 +20,9 @@ export default function SubmitProposalPage() {
   const [supError, setSupError] = useState('');
   const [supervisorId, setSupervisorId] = useState('');
 
+  // cycle banner (if no active cycle, let the user know)
+  const [hasActiveCycle, setHasActiveCycle] = useState(true);
+
   const [submitting, setSubmitting] = useState(false);
   const [fileKey, setFileKey] = useState(0);
 
@@ -27,13 +31,33 @@ export default function SubmitProposalPage() {
   const [submittedTo, setSubmittedTo] = useState(null);
   const modalRef = useRef(null);
 
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectSup = searchParams.get('sup'); // from BrowseProjectsPage deep link
+
   const token = localStorage.getItem('token');
   const authHeaders = useMemo(
-    () => ({
-      Authorization: token ? `Bearer ${token}` : '',
-    }),
+    () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
+
+  // Fetch cycle status for banner clarity
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${API}/cycle/status`, { headers: authHeaders });
+        if (!mounted) return;
+        setHasActiveCycle(Boolean(data?.hasActiveCycle));
+      } catch {
+        if (!mounted) return;
+        setHasActiveCycle(true); // be permissive if status endpoint unavailable
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [authHeaders]);
 
   // ✅ Load supervisors who are accepting student ideas
   useEffect(() => {
@@ -42,27 +66,43 @@ export default function SubmitProposalPage() {
       setSupError('');
       setLoadingSup(true);
       try {
-        const { data } = await axios.get(
-          `${API}/proposals/supervisors/accepting-ideas`,
-          { headers: authHeaders }
-        );
-        if (mounted) {
-          setSupervisors(Array.isArray(data) ? data : []);
+        const { data } = await axios.get(`${API}/proposals/supervisors/accepting-ideas`, {
+          headers: authHeaders,
+        });
+
+        if (!mounted) return;
+
+        const list = Array.isArray(data) ? data : [];
+        setSupervisors(list);
+
+        // If we deep-linked with ?sup=<id> and that supervisor is in the list, preselect it
+        if (preselectSup && list.length) {
+          const found = list.find((s) => String(s.supervisor_id) === String(preselectSup));
+          if (found) setSupervisorId(String(found.supervisor_id));
+        }
+
+        // If list is empty and we know there is no active cycle, show a clear message
+        if (list.length === 0 && hasActiveCycle === false) {
+          setSupError('No active allocation cycle. Proposals are closed right now.');
         }
       } catch (err) {
-        if (mounted) {
-          console.error('Error loading supervisors:', err);
-          setSupError('Could not load supervisors.');
-          setSupervisors([]);
+        if (!mounted) return;
+        console.error('Error loading supervisors:', err);
+        if (err?.response?.status === 401 || err?.response?.status === 403) {
+          setSupError('Please log in to submit a proposal.');
+        } else {
+          setSupError(err?.response?.data?.message || 'Could not load supervisors.');
         }
+        setSupervisors([]);
       } finally {
         if (mounted) setLoadingSup(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
-  }, [authHeaders]);
+  }, [authHeaders, preselectSup, hasActiveCycle]);
 
   // ESC to close modal
   useEffect(() => {
@@ -80,16 +120,30 @@ export default function SubmitProposalPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!token) {
+      alert('Please log in to submit a proposal.');
+      navigate('/login');
+      return;
+    }
+
     if (!supervisorId || !title.trim() || !description.trim()) {
       alert('Please fill in title, description, and choose a supervisor.');
       return;
     }
 
-    const sup = supervisors.find(
-      (s) => String(s.supervisor_id) === String(supervisorId)
-    );
-    if (!sup || sup.seats_left <= 0) {
+    const sup = supervisors.find((s) => String(s.supervisor_id) === String(supervisorId));
+    if (!sup) {
+      alert('Selected supervisor is not currently accepting student ideas.');
+      return;
+    }
+    if (sup.seats_left <= 0) {
       alert('Selected supervisor has no seats available.');
+      return;
+    }
+
+    // Optional: small client-side file guard (~10MB)
+    if (file && file.size > 10 * 1024 * 1024) {
+      alert('File is too large (max 10 MB).');
       return;
     }
 
@@ -101,8 +155,9 @@ export default function SubmitProposalPage() {
 
     try {
       setSubmitting(true);
+      // Let Axios set the multipart boundary automatically:
       await axios.post(`${API}/proposals`, fd, {
-        headers: { ...authHeaders, 'Content-Type': 'multipart/form-data' },
+        headers: { ...authHeaders },
       });
 
       setSubmittedTo(sup || null);
@@ -114,10 +169,19 @@ export default function SubmitProposalPage() {
       setSupervisorId('');
       setFile(null);
       setFileKey((k) => k + 1);
+
+      // Refresh supervisors to reflect updated seats
+      try {
+        const { data } = await axios.get(`${API}/proposals/supervisors/accepting-ideas`, {
+          headers: authHeaders,
+        });
+        setSupervisors(Array.isArray(data) ? data : []);
+      } catch {
+        /* ignore refresh errors */
+      }
     } catch (err) {
       console.error('Submit proposal error:', err);
-      const msg =
-        err?.response?.data?.message || 'Failed to submit proposal.';
+      const msg = err?.response?.data?.message || 'Failed to submit proposal.';
       alert(msg);
     } finally {
       setSubmitting(false);
@@ -134,9 +198,15 @@ export default function SubmitProposalPage() {
 
           <div className="page-inner">
             <h2>Submit Your Proposal</h2>
+            {!hasActiveCycle && (
+              <p className="muted" style={{ color: '#b00' }}>
+                There is no active allocation cycle right now. You can draft your proposal,
+                but supervisors list will appear once a cycle opens.
+              </p>
+            )}
             <p className="muted">
-              Only supervisors currently accepting student ideas are shown
-              below. Seats update as offers are accepted.
+              Only supervisors currently accepting student ideas are shown below. Seats update as offers
+              are accepted.
             </p>
 
             <form onSubmit={handleSubmit} className="proposal-form">
@@ -168,25 +238,14 @@ export default function SubmitProposalPage() {
               >
                 <option value="">-- Select Supervisor --</option>
                 {supervisors.map((s) => (
-                  <option
-                    key={s.supervisor_id}
-                    value={s.supervisor_id}
-                    disabled={s.seats_left <= 0}
-                  >
-                    {s.name}{' '}
-                    {s.email ? `(${s.email})` : ''} —{' '}
-                    {s.seats_left > 0
-                      ? `${s.seats_left} seat${
-                          s.seats_left > 1 ? 's' : ''
-                        } left`
-                      : 'Full'}
+                  <option key={s.supervisor_id} value={s.supervisor_id} disabled={s.seats_left <= 0}>
+                    {s.name} {s.email ? `(${s.email})` : ''} —{' '}
+                    {s.seats_left > 0 ? `${s.seats_left} seat${s.seats_left > 1 ? 's' : ''} left` : 'Full'}
                   </option>
                 ))}
               </select>
               {loadingSup && <small>Loading supervisors…</small>}
-              {!loadingSup && supError && (
-                <small style={{ color: '#b00' }}>{supError}</small>
-              )}
+              {!loadingSup && supError && <small style={{ color: '#b00' }}>{supError}</small>}
               {!loadingSup && !supError && supervisors.length === 0 && (
                 <small style={{ color: '#b00' }}>
                   No supervisors are currently accepting student proposals.
@@ -202,12 +261,7 @@ export default function SubmitProposalPage() {
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
 
-              <button
-                type="submit"
-                disabled={
-                  submitting || loadingSup || supervisors.length === 0
-                }
-              >
+              <button type="submit" disabled={submitting || loadingSup || supervisors.length === 0}>
                 {submitting ? 'Submitting…' : 'Submit Proposal'}
               </button>
             </form>
@@ -217,19 +271,13 @@ export default function SubmitProposalPage() {
 
       {/* Success Modal */}
       {successOpen && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={onBackdropClick}
-          aria-modal="true"
-          role="dialog"
-        >
+        <div className="modal-backdrop" onMouseDown={onBackdropClick} aria-modal="true" role="dialog">
           <div className="modal" ref={modalRef}>
             <div className="modal-icon">✅</div>
             <h3 className="modal-title">Proposal submitted</h3>
             <p className="modal-text">
-              Your proposal has been submitted to{' '}
-              <strong>{submittedTo?.name || 'the selected supervisor'}</strong>
-              . Please wait for their response.
+              Your proposal has been submitted to <strong>{submittedTo?.name || 'the selected supervisor'}</strong>.
+              Please wait for their response.
             </p>
 
             <div className="modal-actions" style={{ textAlign: 'center' }}>
@@ -237,8 +285,19 @@ export default function SubmitProposalPage() {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => setSuccessOpen(false)}
+                style={{ marginRight: 8 }}
               >
                 Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setSuccessOpen(false);
+                  navigate('/my-proposals');
+                }}
+              >
+                View my proposals
               </button>
             </div>
           </div>

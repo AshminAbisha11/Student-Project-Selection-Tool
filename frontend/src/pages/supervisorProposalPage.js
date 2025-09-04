@@ -127,7 +127,7 @@ function ProposalCard({ p, onOpen }) {
 function ProposalList({ items, onOpen }) {
   if (!items.length) return <div className="sv-proposals-empty">No items.</div>;
   return (
-    <ul className="sv-proposals-list">
+    <ul className="sv-proposals-list" role="list">
       {items.map((p) => (
         <ProposalCard key={p.proposal_id} p={p} onOpen={onOpen} />
       ))}
@@ -151,6 +151,11 @@ export default function SupervisorProposalsPage() {
     catch { return null; }
   })();
 
+  const authHeaders = useMemo(
+    () => (token ? { Authorization: `Bearer ${token}` } : {}),
+    [token]
+  );
+
   // guard
   useEffect(() => {
     if (!token || !user) {
@@ -160,7 +165,7 @@ export default function SupervisorProposalsPage() {
     if (String(user.role || '').toLowerCase() !== 'supervisor') {
       navigate('/student-dashboard', { replace: true });
     }
-  }, [navigate, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [navigate, token, user]);
 
   // Fetch proposals
   useEffect(() => {
@@ -170,12 +175,30 @@ export default function SupervisorProposalsPage() {
         setLoading(true);
         setError('');
         const res = await fetch(`${API}${SUP_BASE}/proposals`, {
-          headers: { Authorization: token ? `Bearer ${token}` : '' },
+          headers: authHeaders,
           signal: ac.signal,
         });
+
+        // Handle auth expiry
+        if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          navigate('/login', { replace: true });
+          return;
+        }
+
         if (!res.ok) throw new Error((await res.text()) || `Failed: ${res.status}`);
         const data = await res.json();
-        setProposals(Array.isArray(data) ? data : []);
+
+        // sort newest first by created_at if available
+        const list = Array.isArray(data) ? data.slice() : [];
+        list.sort((a, b) => {
+          const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          return tb - ta;
+        });
+
+        setProposals(list);
       } catch (e) {
         if (e.name !== 'AbortError') setError(e.message || 'Failed to load proposals');
       } finally {
@@ -183,7 +206,7 @@ export default function SupervisorProposalsPage() {
       }
     })();
     return () => ac.abort();
-  }, [token, refreshKey]);
+  }, [authHeaders, navigate, refreshKey]);
 
   // Optimistic update from modal
   function handleUpdated(id, updated) {
@@ -239,6 +262,8 @@ export default function SupervisorProposalsPage() {
               proposal={active}
               onClose={() => setActive(null)}
               onUpdated={handleUpdated}
+              token={token}
+              apiBase={API}
             />
           </div>
         </section>

@@ -1,22 +1,52 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorNav from '../components/supervisorNav';
 import './supervisorAllocatedStudentsPage.css';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+/* ---------- utils ---------- */
 function formatDate(input) {
   if (!input) return '—';
-  try {
-    const d = new Date(input);
-    if (Number.isNaN(d.getTime())) return '—';
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(d);
-  } catch {
-    return '—';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(d);
+}
+
+/** Centralized fetch with auth + 401/403 handling */
+async function apiFetch(path, opts = {}, navigate) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API}${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  // Expired / missing auth: bounce to login
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    // If navigate is available prefer it, otherwise hard redirect
+    try {
+      navigate?.('/login', { replace: true });
+    } catch {}
+    throw new Error('Your session has expired. Please log in again.');
   }
+
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+    // ignore non-JSON
+  }
+  if (!res.ok) throw new Error(data?.message || 'Request failed');
+  return data;
 }
 
 export default function SupervisorAllocatedStudentsPage() {
@@ -25,13 +55,19 @@ export default function SupervisorAllocatedStudentsPage() {
   const [err, setErr] = useState('');
   const [detail, setDetail] = useState(null);
 
+  // pull user to ensure role gate (optional, UI-side)
+  const user = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('user') || '{}'); }
+    catch { return {}; }
+  }, []);
+
   const token = localStorage.getItem('token');
   const authHeaders = useMemo(
     () => ({ Authorization: token ? `Bearer ${token}` : '' }),
     [token]
   );
 
-  const fetchList = async () => {
+  const fetchList = useCallback(async () => {
     if (!token) {
       setErr('Please log in as a supervisor.');
       setLoading(false);
@@ -40,37 +76,28 @@ export default function SupervisorAllocatedStudentsPage() {
     setLoading(true);
     setErr('');
     try {
-      const res = await fetch(`${API}/allocations/supervisor`, {
-        headers: authHeaders,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to load allocations');
+      const data = await apiFetch('/allocations/supervisor', { headers: authHeaders });
       setRows(Array.isArray(data) ? data : []);
     } catch (e) {
-      setErr(e.message);
+      setErr(e.message || 'Failed to load allocations');
       setRows([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, authHeaders]);
 
   useEffect(() => {
     fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchList]);
 
   const onDeallocate = async (allocation_id) => {
     if (!window.confirm('Remove this allocation? This frees 1 slot.')) return;
     try {
-      const res = await fetch(`${API}/allocations/${allocation_id}`, {
-        method: 'DELETE',
-        headers: authHeaders,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || 'Failed to deallocate');
+      await apiFetch(`/allocations/${allocation_id}`, { method: 'DELETE', headers: authHeaders });
       setRows((prev) => prev.filter((r) => r.allocation_id !== allocation_id));
+      // Optionally: toast/snackbar here
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Failed to deallocate');
     }
   };
 
@@ -101,6 +128,11 @@ export default function SupervisorAllocatedStudentsPage() {
             </div>
           </div>
 
+          {/* Optional client-side guard for role */}
+          {user?.role && String(user.role).toLowerCase() !== 'supervisor' && (
+            <div className="alloc-alert">This page is for supervisors only.</div>
+          )}
+
           {err && <div className="alloc-alert">{err}</div>}
 
           {loading ? (
@@ -112,26 +144,31 @@ export default function SupervisorAllocatedStudentsPage() {
               {rows.map((r) => (
                 <article key={r.allocation_id} className="alloc-card">
                   <header className="alloc-card-hd">
-                    <h3 className="alloc-title">{r.student_name}</h3>
+                    <h3 className="alloc-title">{r.student_name || 'Student'}</h3>
                     <span
                       className={`alloc-chip ${
-                        r.allocation_status === 'allocated' ? 'ok' : ''
+                        String(r.allocation_status || '').toLowerCase() === 'allocated' ? 'ok' : ''
                       }`}
+                      title={r.allocation_status}
                     >
-                      {r.allocation_status}
+                      {r.allocation_status || 'allocated'}
                     </span>
                   </header>
 
                   <dl className="alloc-kv">
                     <dt>Project</dt>
-                    <dd>{r.project_title}</dd>
+                    <dd>{r.project_title || '—'}</dd>
 
                     <dt>Topic</dt>
                     <dd>{r.project_topic_text || '—'}</dd>
 
                     <dt>Student Email</dt>
                     <dd>
-                      <a href={`mailto:${r.student_email}`}>{r.student_email}</a>
+                      {r.student_email ? (
+                        <a href={`mailto:${r.student_email}`}>{r.student_email}</a>
+                      ) : (
+                        '—'
+                      )}
                     </dd>
 
                     <dt>Allocated</dt>
@@ -165,9 +202,17 @@ export default function SupervisorAllocatedStudentsPage() {
 }
 
 function AllocationDetailModal({ record, onClose }) {
-  const fileUrl = record.proposal_file_path
-    ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/uploads/${record.proposal_file_path}`
+  const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const fileUrl = record?.proposal_file_path
+    ? `${apiBase}/uploads/${record.proposal_file_path}`
     : null;
+
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copied to clipboard');
+    } catch {}
+  };
 
   return (
     <div
@@ -175,10 +220,13 @@ function AllocationDetailModal({ record, onClose }) {
       onMouseDown={(e) => {
         if (e.target.classList.contains('alloc-modal-backdrop')) onClose();
       }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Allocation details"
     >
       <div className="alloc-modal">
         <header className="alloc-modal-hd">
-          <h3>{record.student_name}</h3>
+          <h3>{record.student_name || 'Student'}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -187,17 +235,23 @@ function AllocationDetailModal({ record, onClose }) {
         <section className="alloc-modal-body">
           <h4>Project</h4>
           <p>
-            <strong>{record.project_title}</strong>
+            <strong>{record.project_title || '—'}</strong>
           </p>
-          <p className="muted">{record.project_description}</p>
+          {record.project_description && (
+            <p className="muted">{record.project_description}</p>
+          )}
 
           <h4 style={{ marginTop: 16 }}>Proposal (if any)</h4>
-          {record.proposal_title ? (
+          {record.proposal_title || record.proposal_description || fileUrl ? (
             <>
-              <p>
-                <strong>{record.proposal_title}</strong>
-              </p>
-              <p className="muted">{record.proposal_description}</p>
+              {record.proposal_title && (
+                <p>
+                  <strong>{record.proposal_title}</strong>
+                </p>
+              )}
+              {record.proposal_description && (
+                <p className="muted">{record.proposal_description}</p>
+              )}
               {fileUrl && (
                 <p>
                   <a
@@ -214,12 +268,27 @@ function AllocationDetailModal({ record, onClose }) {
           ) : (
             <p className="muted">No uploaded proposal file.</p>
           )}
+
+          <h4 style={{ marginTop: 16 }}>Student</h4>
+          <p className="muted">{record.student_name || '—'}</p>
+          {record.student_email && (
+            <p className="muted">
+              <a className="alloc-email" href={`mailto:${record.student_email}`}>
+                {record.student_email}
+              </a>{' '}
+              <button className="ppm-chip" onClick={() => copy(record.student_email)}>
+                Copy
+              </button>
+            </p>
+          )}
         </section>
 
         <footer className="alloc-modal-ft">
-          <a className="btn btn-outline" href={`mailto:${record.student_email}`}>
-            Email Student
-          </a>
+          {record.student_email && (
+            <a className="btn btn-outline" href={`mailto:${record.student_email}`}>
+              Email Student
+            </a>
+          )}
           <button className="btn" onClick={onClose}>
             Close
           </button>

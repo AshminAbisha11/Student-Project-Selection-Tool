@@ -22,6 +22,17 @@ async function getActiveCycleId() {
   return byDate.length ? byDate[0].cycle_id : null;
 }
 
+async function getLatestCommittedCycleId(connOrPool = db) {
+  const [r] = await connOrPool.query(
+    `SELECT cycle_id
+       FROM allocation_cycles
+      WHERE status='committed'
+      ORDER BY commit_at DESC, cycle_id DESC
+      LIMIT 1`
+  );
+  return r.length ? r[0].cycle_id : null;
+}
+
 async function cycleExists(id) {
   const [r] = await db.query(
     `SELECT 1 FROM allocation_cycles WHERE cycle_id=? LIMIT 1`,
@@ -30,17 +41,32 @@ async function cycleExists(id) {
   return r.length > 0;
 }
 
-/* Open cycle if available, otherwise latest cycle this supervisor used */
+/**
+ * Open cycle if available, else:
+ * 1) latest committed cycle where THIS supervisor has allocations
+ * 2) else latest cycle where this supervisor has non-archived projects
+ */
 async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
-  // Try open cycle first
-  const [byStatus] = await db.query(
-    `SELECT cycle_id FROM allocation_cycles
-      WHERE status='open'
-      ORDER BY submission_open_at DESC LIMIT 1`
-  );
-  if (byStatus.length) return byStatus[0].cycle_id;
+  // 0) try open cycle
+  const open = await getActiveCycleId();
+  if (open) return open;
 
-  // Else: most recent cycle this supervisor actually used
+  // 1) their latest committed cycle with allocations
+  const [allocRows] = await db.query(
+    `
+    SELECT a.cycle_id
+      FROM allocations a
+      JOIN allocation_cycles c ON c.cycle_id = a.cycle_id
+     WHERE a.supervisor_id = ?
+       AND c.status = 'committed'
+     ORDER BY c.commit_at DESC, a.allocated_at DESC, a.allocation_id DESC
+     LIMIT 1
+    `,
+    [supervisorId]
+  );
+  if (allocRows.length) return allocRows[0].cycle_id;
+
+  // 2) latest from their projects activity
   const [[latestFromProjects]] = await db.query(
     `SELECT p.cycle_id
        FROM projects p
@@ -54,12 +80,13 @@ async function getActiveOrLatestCycleIdForSupervisor(supervisorId) {
 }
 
 /* ---------------- Dashboard Overview ---------------- */
-// GET /supervisor/overview
+// GET /supervisor/overview  (optional ?cycle_id=123 to scope allocated count)
 exports.getOverview = async (req, res) => {
   try {
     const supervisorId = req.user?.user_id;
     if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
 
+    // projects (overall, non-archived)
     const [[projRow]] = await db.query(
       `SELECT COUNT(*) AS projects
          FROM projects
@@ -68,6 +95,7 @@ exports.getOverview = async (req, res) => {
       [supervisorId]
     );
 
+    // proposals (overall, pending-ish)
     const [[propRow]] = await db.query(
       `SELECT COUNT(*) AS pendingProposals
          FROM proposals
@@ -76,18 +104,36 @@ exports.getOverview = async (req, res) => {
       [supervisorId]
     );
 
+    // studentsAllocated (scoped to chosen cycle)
+    let chosenCycleId = null;
+    const raw = req.query?.cycle_id;
+    if (raw != null && String(raw).trim() !== '' && await cycleExists(Number(raw))) {
+      chosenCycleId = Number(raw);
+    } else {
+      // prefer latest committed; if none, show for open (if any)
+      chosenCycleId = await getLatestCommittedCycleId() ?? await getActiveCycleId();
+    }
+
+    const allocParams = [supervisorId];
+    let allocWhere = `WHERE supervisor_id = ? AND status = 'allocated'`;
+    if (chosenCycleId) {
+      allocWhere += ` AND cycle_id = ?`;
+      allocParams.push(chosenCycleId);
+    }
+
     const [[allocRow]] = await db.query(
       `SELECT COUNT(DISTINCT student_id) AS students
          FROM allocations
-        WHERE supervisor_id = ?
-          AND status = 'allocated'`,
-      [supervisorId]
+         ${allocWhere}`,
+      allocParams
     );
 
+    res.set('Cache-Control', 'no-store');
     res.json({
       projects: Number(projRow?.projects || 0),
       pendingProposals: Number(propRow?.pendingProposals || 0),
       studentsAllocated: Number(allocRow?.students || 0),
+      cycle_id_used_for_allocations: chosenCycleId || null,
     });
   } catch (e) {
     console.error('getOverview error:', e);
@@ -95,14 +141,105 @@ exports.getOverview = async (req, res) => {
   }
 };
 
+/* ---------------- Create Project ---------------- */
+// POST /supervisor/projects
+// body: { title, description, topic, keywords, quota }
+exports.createProject = async (req, res) => {
+  try {
+    const supervisorId = req.user?.user_id;
+    if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const {
+      title,
+      description,
+      topic,
+      keywords = null,
+      quota = 1,
+    } = req.body || {};
+
+    if (!title || !topic) {
+      return res.status(400).json({ message: 'title and topic are required' });
+    }
+
+    const activeId = await getActiveCycleId(); // may be null
+
+    const [r] = await db.query(
+      `
+      INSERT INTO projects
+        (supervisor_id, cycle_id, title, description, topic, keywords, quota,
+         approval_status, is_archived, spots_filled, is_student_pool, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', 0, 0, 0, NOW(), NOW())
+      `,
+      [supervisorId, activeId, title, description || null, topic, keywords, Number(quota) || 1]
+    );
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      message: activeId
+        ? 'Project created and attached to the active cycle.'
+        : 'Project created as a draft (no active cycle). It will appear to students once a cycle is opened.',
+      project: {
+        project_id: r.insertId,
+        title,
+        description: description || null,
+        topic,
+        keywords,
+        quota: Number(quota) || 1,
+        cycle_id: activeId,
+      },
+    });
+  } catch (e) {
+    console.error('createProject error:', e);
+    res.status(500).json({ message: 'Failed to create project' });
+  }
+};
+
+/* ---------------- Publish Draft -> Cycle ---------------- */
+// PATCH /supervisor/projects/:id/publish { cycle_id }
+exports.publishDraft = async (req, res) => {
+  try {
+    const supervisorId = req.user?.user_id;
+    const projectId = Number(req.params.id);
+    const { cycle_id } = req.body || {};
+    if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
+    if (!projectId) return res.status(400).json({ message: 'projectId required' });
+    if (!cycle_id || !(await cycleExists(cycle_id))) {
+      return res.status(400).json({ message: 'Valid cycle_id required' });
+    }
+
+    // Ensure it's their draft
+    const [[p]] = await db.query(
+      `SELECT project_id, supervisor_id, cycle_id, is_archived
+         FROM projects
+        WHERE project_id=? AND supervisor_id=?`,
+      [projectId, supervisorId]
+    );
+    if (!p) return res.status(404).json({ message: 'Project not found' });
+    if (Number(p.is_archived) === 1) {
+      return res.status(400).json({ message: 'Cannot publish archived project' });
+    }
+
+    await db.query(
+      `UPDATE projects SET cycle_id=?, updated_at=CURRENT_TIMESTAMP WHERE project_id=?`,
+      [cycle_id, projectId]
+    );
+
+    res.set('Cache-Control', 'no-store');
+    res.json({ message: 'Draft published to cycle', project_id: projectId, cycle_id });
+  } catch (e) {
+    console.error('publishDraft error:', e);
+    res.status(500).json({ message: 'Failed to publish draft' });
+  }
+};
+
 /* ---------------- My Projects listing ---------------- */
-// GET /supervisor/projects?tab=active|draft|archived&cycle=active|all|<cycle_id>&q=...
+// GET /supervisor/projects?tab=active|draft|archived&cycle=active|latest|all|<cycle_id>&q=...
 exports.getMyProjects = async (req, res) => {
   try {
     const supervisorId = req.user?.user_id;
     if (!supervisorId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const tab   = String(req.query.tab || 'active').toLowerCase();
+    let tab   = String(req.query.tab || 'active').toLowerCase();
     const q     = (req.query.q || '').trim();
     const cycle = String(req.query.cycle || 'active').toLowerCase();
 
@@ -110,25 +247,31 @@ exports.getMyProjects = async (req, res) => {
     let where = `WHERE p.supervisor_id = ?`;
 
     /* ----- cycle filter ----- */
+    let chosenId = null;
     if (cycle === 'active' || cycle === 'latest') {
-      const chosenId = await getActiveOrLatestCycleIdForSupervisor(supervisorId);
+      chosenId = await getActiveOrLatestCycleIdForSupervisor(supervisorId);
       if (chosenId) {
         where += ` AND p.cycle_id = ?`;
         params.push(chosenId);
       }
-      // if no chosenId -> no extra filter; will return empty after tab filter
+      // If no chosenId, don't add cycle filter yet; we might fall back to drafts.
     } else if (cycle !== 'all' && /^\d+$/.test(cycle)) {
       where += ` AND p.cycle_id = ?`;
       params.push(Number(cycle));
     }
     // 'all' => no cycle_id predicate
 
-    /* ----- status (tab) filter ----- */
-    // We don't have a projects.status column in schema, so:
-    // - archived: is_archived = 1
-    // - draft:    is_archived = 0 AND cycle_id IS NULL
-    // - active:   is_archived = 0 AND cycle_id IS NOT NULL
+    /* ----- smart fallback: if no active/latest cycle and user asked for active tab, show drafts ----- */
     let statusFilter = '';
+    if ((cycle === 'active' || cycle === 'latest') && !chosenId && tab === 'active') {
+      // No active cycle -> show drafts instead (most helpful behaviour)
+      tab = 'draft';
+    }
+
+    /* ----- status (tab) filter ----- */
+    // archived: is_archived = 1
+    // draft:    is_archived = 0 AND cycle_id IS NULL
+    // active:   is_archived = 0 AND cycle_id IS NOT NULL
     if (tab === 'archived') {
       statusFilter = ` AND p.is_archived = 1`;
     } else if (tab === 'draft') {
@@ -179,9 +322,7 @@ exports.getMyProjects = async (req, res) => {
     `;
 
     const [rows] = await db.query(sql, params);
-
-    // If cycle tab was 'active/latest' and no active/latest cycle exists,
-    // and we also asked for draft/active filtering, rows could be empty – that's OK.
+    res.set('Cache-Control', 'no-store');
     res.json(rows || []);
   } catch (e) {
     console.error('getMyProjects error:', e);
@@ -200,6 +341,7 @@ exports.listSupervisors = async (_req, res) => {
         WHERE role = 'supervisor'
         ORDER BY name ASC`
     );
+    res.set('Cache-Control', 'no-store');
     res.json(rows || []);
   } catch (e) {
     console.error('listSupervisors error:', e);
@@ -239,6 +381,7 @@ exports.getReceivedProposals = async (req, res) => {
       [supervisorId]
     );
 
+    res.set('Cache-Control', 'no-store');
     res.json(rows || []);
   } catch (err) {
     console.error('getReceivedProposals error:', err);
@@ -246,7 +389,8 @@ exports.getReceivedProposals = async (req, res) => {
   }
 };
 
-// PATCH /supervisor/proposals/:id/decision  { status: 'accepted'|'rejected'|'under_review', reason?: string }
+// PATCH /supervisor/proposals/:id/decision
+// body: { status: 'accepted'|'rejected'|'under_review', reason?: string }
 exports.decideProposal = async (req, res) => {
   let conn;
   try {
@@ -374,6 +518,7 @@ exports.decideProposal = async (req, res) => {
       [proposalId]
     );
 
+    res.set('Cache-Control', 'no-store');
     res.json(updated);
   } catch (e) {
     console.error('decideProposal error:', e);

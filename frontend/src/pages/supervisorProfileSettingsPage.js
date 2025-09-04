@@ -1,3 +1,7 @@
+// src/pages/supervisorProfileSettingsPage.css
+// (kept as-is)
+
+// src/pages/supervisorProfileSettingsPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -8,15 +12,20 @@ import './supervisorProfileSettingsPage.css';
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function parseJwt(token) {
-  try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; }
+  try {
+    const base64Url = (token?.split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64Url));
+  } catch {
+    return null;
+  }
 }
 
 export default function ProfileSettingsPage() {
   const navigate = useNavigate();
 
-  // token + auth header (memoized)
-  const token = useMemo(() => localStorage.getItem('token'), []);
-  const auth = useMemo(() => token ? { Authorization: `Bearer ${token}` } : {}, [token]);
+  // token + auth header (memoized once on mount)
+  const token = useMemo(() => localStorage.getItem('token') || '', []);
+  const auth = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,27 +78,32 @@ export default function ProfileSettingsPage() {
         setInitial(next);
       } catch (e) {
         if (!alive) return;
-        const msg = e?.response?.data?.message
-          || (e?.response?.status === 401 ? 'Session expired. Please log in again.' : 'Failed to load profile');
+        const status = e?.response?.status;
+        const msg =
+          e?.response?.data?.message ||
+          (status === 401 || status === 403 ? 'Session expired. Please log in again.' : 'Failed to load profile');
+
         setError(msg);
-        if (e?.response?.status === 401) {
+
+        if (status === 401 || status === 403) {
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           navigate('/login', { replace: true });
-        } else {
-          // Fall back to token payload so user can still see their name/email
-          const payload = parseJwt(token);
-          const fallback = {
-            name: payload?.name || '',
-            email: payload?.email || '',
-            department: '',
-            phone: '',
-            office: '',
-            bio: '',
-          };
-          setForm(fallback);
-          setInitial(fallback);
+          return;
         }
+
+        // Fallback to token payload so user can still see their name/email
+        const payload = parseJwt(token);
+        const fallback = {
+          name: payload?.name || '',
+          email: payload?.email || '',
+          department: '',
+          phone: '',
+          office: '',
+          bio: '',
+        };
+        setForm(fallback);
+        setInitial(fallback);
       } finally {
         if (alive) setLoading(false);
       }
@@ -108,6 +122,7 @@ export default function ProfileSettingsPage() {
   // ---------- Handlers ----------
   const onChange = (e) => {
     const { name, value } = e.target;
+    setError('');
     setForm(prev => ({ ...prev, [name]: value }));
   };
 
@@ -117,13 +132,13 @@ export default function ProfileSettingsPage() {
     return '';
   };
 
+  // send only changed fields; always include name
   const buildPayload = () => {
-    // send only changed fields, but always include name (backend often requires it)
     const payload = {};
     ['name','department','phone','office','bio'].forEach(k => {
       if (form[k] !== initial[k]) payload[k] = form[k] || null;
     });
-    if (!('name' in payload)) payload.name = form.name; // ensure name is present
+    if (!('name' in payload)) payload.name = form.name;
     return payload;
   };
 
@@ -139,7 +154,7 @@ export default function ProfileSettingsPage() {
         headers: { ...auth, 'Content-Type': 'application/json' },
       });
 
-      // Prefer the server’s echo for canonical values (trims, etc.)
+      // canonical values from server
       const next = {
         name:        data?.name ?? form.name,
         email:       data?.email ?? form.email,
@@ -152,6 +167,21 @@ export default function ProfileSettingsPage() {
       setForm(next);
       setInitial(next);
       setSavedAt(new Date().toISOString());
+
+      // Keep localStorage user in sync (so menus / headers show the new name, etc.)
+      try {
+        const cur = JSON.parse(localStorage.getItem('user') || '{}');
+        const updatedUser = {
+          ...cur,
+          name: next.name,
+          email: next.email,
+          department: next.department,
+          phone: next.phone,
+          office: next.office,
+          bio: next.bio,
+        };
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } catch {}
     } catch (e) {
       setError(e?.response?.data?.message || 'Save failed');
     } finally {
@@ -159,7 +189,10 @@ export default function ProfileSettingsPage() {
     }
   };
 
-  const onCancel = () => setForm(initial);
+  const onCancel = () => {
+    setError('');
+    setForm(initial);
+  };
 
   // ---------- UI ----------
   return (
@@ -198,6 +231,7 @@ export default function ProfileSettingsPage() {
                     value={form.name}
                     onChange={onChange}
                     placeholder="Your full name"
+                    autoComplete="name"
                   />
                 </div>
 
@@ -211,6 +245,7 @@ export default function ProfileSettingsPage() {
                     readOnly
                     className="read-only"
                     title="Email is managed by the university"
+                    autoComplete="email"
                   />
                   <small className="muted">Email is read-only.</small>
                 </div>
@@ -224,6 +259,7 @@ export default function ProfileSettingsPage() {
                     value={form.department}
                     onChange={onChange}
                     placeholder="e.g., Computer Science"
+                    autoComplete="organization"
                   />
                 </div>
               </div>
@@ -240,6 +276,7 @@ export default function ProfileSettingsPage() {
                     value={form.phone}
                     onChange={onChange}
                     placeholder="+44 1234 567890"
+                    autoComplete="tel"
                   />
                 </div>
 
@@ -272,7 +309,9 @@ export default function ProfileSettingsPage() {
             <div className="ps-actions">
               <button
                 className="btn btn-outline"
-                onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/supervisor-dashboard'))}
+                onClick={() =>
+                  (window.history.length > 1 ? navigate(-1) : navigate('/supervisor-dashboard'))
+                }
                 title="Go back"
               >
                 ← Back
@@ -282,6 +321,7 @@ export default function ProfileSettingsPage() {
                 className="btn btn-secondary"
                 onClick={onCancel}
                 disabled={!dirty || saving}
+                title={!dirty ? 'No changes to cancel' : 'Revert unsaved changes'}
               >
                 Cancel
               </button>
