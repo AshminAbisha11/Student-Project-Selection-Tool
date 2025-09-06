@@ -5,6 +5,78 @@ import "./adminAllocationPage.css";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+/* ===========================
+   Confirm modal + hook (reusable)
+   =========================== */
+function ConfirmModal({
+  open,
+  title = "Confirm",
+  message,
+  confirmText = "OK",
+  cancelText = "Cancel",
+  onConfirm,
+  onCancel,
+}) {
+  if (!open) return null;
+  return (
+    <div className="adbd-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div className="adbd-modal">
+        <h4 id="confirm-title" className="adbd-modal-title">{title}</h4>
+        {message && <p className="adbd-modal-body">{message}</p>}
+        <div className="adbd-modal-actions">
+          <button className="adbd-btn adbd-btn--ghost" onClick={onCancel}>{cancelText}</button>
+          <button className="adbd-btn adbd-btn--primary" onClick={onConfirm}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useConfirm() {
+  const [state, setState] = React.useState({ open: false });
+  const confirm = React.useCallback(({ title, message, confirmText = "OK", cancelText = "Cancel" }) => {
+    return new Promise((resolve) => {
+      setState({
+        open: true,
+        title,
+        message,
+        confirmText,
+        cancelText,
+        onConfirm: () => { setState({ open: false }); resolve(true); },
+        onCancel:  () => { setState({ open: false }); resolve(false); },
+      });
+    });
+  }, []);
+  const modal = (
+    <ConfirmModal
+      open={state.open}
+      title={state.title}
+      message={state.message}
+      confirmText={state.confirmText}
+      cancelText={state.cancelText}
+      onConfirm={state.onConfirm}
+      onCancel={state.onCancel}
+    />
+  );
+  return [confirm, modal];
+}
+
+/* ===========================
+   Basic content modal (for two-step flow)
+   =========================== */
+function BasicModal({ open, title, children, actions }) {
+  if (!open) return null;
+  return (
+    <div className="adbd-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className="adbd-modal">
+        {title && <h4 id="modal-title" className="adbd-modal-title">{title}</h4>}
+        <div className="adbd-modal-body">{children}</div>
+        <div className="adbd-modal-actions">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
 /** Unified API helper with auth + 401/403 handling */
 async function apiFetch(path, opts = {}) {
   const token = localStorage.getItem("token");
@@ -48,14 +120,15 @@ const fmtHMS = (s) => {
 };
 
 export default function AdminAllocationPage() {
+  const [confirm, confirmModal] = useConfirm();          // confirm hook (force delete, single-step confirm)
+  const [activeModal, setActiveModal] = useState(null);  // null | 'commitCycle' | 'commitAlloc'
+
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
   const [editing, setEditing] = useState(false);
-
-  // inline “create new cycle” mode even if a cycle exists
   const [creatingNew, setCreatingNew] = useState(false);
 
   const [form, setForm] = useState({
@@ -123,7 +196,6 @@ export default function AdminAllocationPage() {
     setErr("");
     setOk("");
 
-    // Basic validation (backend also validates)
     if (!form.name.trim() || !form.submission_open_at || !form.submission_close_at) {
       setErr("Name, Opens and Closes are required.");
       return;
@@ -196,10 +268,14 @@ export default function AdminAllocationPage() {
     } catch (e) {
       const msg = (e?.message || "").toLowerCase();
       if (msg.includes("pass ?force=1")) {
-        const yes = window.confirm(
-          "This cycle still has data (e.g., projects/allocations). Delete the cycle and remove all related data now?"
-        );
-        if (!yes) {
+        const okForce = await confirm({
+          title: "Force delete cycle?",
+          message:
+            "This cycle still has related data (projects/allocations). Delete the cycle and remove ALL related data?",
+          confirmText: "Delete everything",
+          cancelText: "Cancel",
+        });
+        if (!okForce) {
           setErr("Deletion cancelled.");
           return;
         }
@@ -245,7 +321,7 @@ export default function AdminAllocationPage() {
     }
   };
 
-  // Allocation
+  // Allocation preview
   const doPreview = async () => {
     setPreview(null);
     setPreviewing(true);
@@ -266,10 +342,8 @@ export default function AdminAllocationPage() {
     }
   };
 
-  const doCommit = async (skipConfirm = false) => {
-    if (!skipConfirm) {
-      if (!window.confirm("Commit allocations? This will write to DB.")) return;
-    }
+  // Allocation commit
+  const doCommit = async () => {
     setCommitting(true);
     setCommitMsg("");
     try {
@@ -289,31 +363,33 @@ export default function AdminAllocationPage() {
     }
   };
 
-  // Mark cycle as COMMITTED; offer to run allocation commit afterwards
-  const commitNow = async () => {
-    if (!status?.cycle) return;
-    if (
-      !window.confirm(
-        "Commit this cycle now? This marks the cycle as committed (and back-fills close time if missing)."
-      )
-    )
-      return;
+  /* ================
+     Two-step modal flow
+     ================ */
 
+  // Step 1: open commit-cycle modal
+  const commitNow = () => {
+    if (!status?.cycle) return;
+    setActiveModal("commitCycle");
+  };
+
+  // Step 1 action: mark cycle as committed
+  const handleCommitCycle = async () => {
+    if (!status?.cycle) return;
     try {
       await apiFetch(`/cycle/${status.cycle.cycle_id}/commit-now`, { method: "POST" });
       setOk("Cycle marked as committed.");
       await loadStatus();
-
-      if (
-        window.confirm(
-          "Run the Allocation commit now (write allocations to DB for this cycle)?"
-        )
-      ) {
-        await doCommit(true);
-      }
+      setActiveModal(null);
     } catch (e) {
       setErr(e.message);
     }
+  };
+
+  // Step 1 action: go to step 2 (alloc commit)
+  const goToCommitAllocations = () => {
+    setActiveModal(null);
+    setActiveModal("commitAlloc");
   };
 
   // Enable commit when commit time is reached OR after submissions close
@@ -534,16 +610,12 @@ export default function AdminAllocationPage() {
 
               <div className="adbd-pills">
                 <span
-                  className={`adbd-pill ${
-                    status.isSubmissionOpen ? "adbd-pill--open" : "adbd-pill--closed"
-                  }`}
+                  className={`adbd-pill ${status.isSubmissionOpen ? "adbd-pill--open" : "adbd-pill--closed"}`}
                 >
                   {status.isSubmissionOpen ? "Submissions OPEN" : "Submissions CLOSED"}
                 </span>
                 <span
-                  className={`adbd-pill ${
-                    status.hasPassedDeadline ? "adbd-pill--warn" : "adbd-pill--open"
-                  }`}
+                  className={`adbd-pill ${status.hasPassedDeadline ? "adbd-pill--warn" : "adbd-pill--open"}`}
                 >
                   {status.hasPassedDeadline ? "After deadline" : "Before deadline"}
                 </span>
@@ -563,9 +635,7 @@ export default function AdminAllocationPage() {
                 </div>
               </div>
 
-              <div
-                style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}
-              >
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {!isOpen && (
                   <button className="adbd-chip" onClick={openNow}>
                     {isClosedOrCommitted ? "Re-open this cycle" : "Open Now"}
@@ -616,7 +686,16 @@ export default function AdminAllocationPage() {
               </button>
               <button
                 className="adbd-btn adbd-btn--primary"
-                onClick={() => doCommit(false)}
+                onClick={async () => {
+                  if (!canCommit) return;
+                  const okDo = await confirm({
+                    title: "Commit allocations?",
+                    message: "This will write allocations to the database for the current cycle.",
+                    confirmText: "Commit",
+                    cancelText: "Cancel",
+                  });
+                  if (okDo) await doCommit();
+                }}
                 disabled={committing || !canCommit}
                 title={!canCommit ? "Reach commit time or after deadline to enable" : ""}
               >
@@ -627,7 +706,6 @@ export default function AdminAllocationPage() {
 
           {commitMsg && <div className="adbd-alert adbd-alert--ok">{commitMsg}</div>}
 
-          {/* Render preview info if you want */}
           {preview && (
             <div className="adbd-preview">
               <div className="adbd-preview-row">
@@ -642,6 +720,53 @@ export default function AdminAllocationPage() {
           )}
         </section>
       </div>
+
+      {/* Step 1: Commit Cycle modal */}
+      <BasicModal
+        open={activeModal === "commitCycle"}
+        title="Commit cycle"
+        actions={[
+          <button key="cancel" className="adbd-btn adbd-btn--ghost" onClick={() => setActiveModal(null)}>Cancel</button>,
+          <button key="alloc"  className="adbd-btn adbd-btn--ghost" onClick={goToCommitAllocations}>Commit allocations…</button>,
+          <button key="commit" className="adbd-btn adbd-btn--primary" onClick={handleCommitCycle}>Commit cycle</button>,
+        ]}
+      >
+        <p>
+          Mark the current allocation cycle as <strong>committed</strong>. This also
+          back-fills the close time if it’s missing.
+        </p>
+        <p style={{ marginTop: 8 }}>
+          To immediately write allocation results to the database, choose
+          <em> “Commit allocations…”</em>.
+        </p>
+      </BasicModal>
+
+      {/* Step 2: Commit Allocations modal */}
+      <BasicModal
+        open={activeModal === "commitAlloc"}
+        title="Commit allocations"
+        actions={[
+          <button key="cancel" className="adbd-btn adbd-btn--ghost" onClick={() => setActiveModal(null)}>Cancel</button>,
+          <button
+            key="run"
+            className="adbd-btn adbd-btn--primary"
+            onClick={async () => {
+              setActiveModal(null);
+              await doCommit();
+            }}
+          >
+            Run commit
+          </button>,
+        ]}
+      >
+        <p>
+          This will <strong>write allocations to the database</strong> for the current cycle.
+          Proceed?
+        </p>
+      </BasicModal>
+
+      {/* Single confirm modal (force delete / right-panel commit confirm) */}
+      {confirmModal}
     </AdminLayout>
   );
 }
