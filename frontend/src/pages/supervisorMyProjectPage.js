@@ -7,7 +7,6 @@ import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorProjectEditModal from '../components/supervisorProjectEditModal';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-const SUP_BASE = '/supervisor';
 
 /* ---------- Confirm Modal ---------- */
 function ConfirmModal({
@@ -88,15 +87,23 @@ export default function MyProjectsPage() {
   const location  = useLocation();
   const isArchivedRoute = location.pathname.endsWith('/archived');
   const [showArchived, setShowArchived] = useState(isArchivedRoute);
-  useEffect(() => setShowArchived(location.pathname.endsWith('/archived')), [location.pathname]);
+
+  useEffect(() => {
+    setShowArchived(location.pathname.endsWith('/archived'));
+  }, [location.pathname]);
 
   const token = localStorage.getItem('token');
   const user  = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
 
   // role guard
   useEffect(() => {
-    if (!token || !user) return navigate('/login', { replace: true });
-    if ((user.role || '').toLowerCase() !== 'supervisor') navigate('/student-dashboard', { replace: true });
+    if (!token || !user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if ((user.role || '').toLowerCase() !== 'supervisor') {
+      navigate('/student-dashboard', { replace: true });
+    }
   }, [navigate, token, user]);
 
   const authHeaders = useMemo(() => ({
@@ -105,27 +112,35 @@ export default function MyProjectsPage() {
   }), [token]);
 
   const fetchMyProjects = useCallback(async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
       const archivedQ = showArchived ? '1' : '0';
+      // ✅ Use the projects/my endpoint which honors ?archived=0|1
       const res = await fetch(
-        `${API}${SUP_BASE}/projects?archived=${archivedQ}&_=${Date.now()}`,
+        `${API}/projects/my?archived=${archivedQ}&_=${Date.now()}`,
         { headers: authHeaders, cache: 'no-store' }
       );
       if (res.status === 401 || res.status === 403) {
-        localStorage.clear(); navigate('/login', { replace: true }); return;
+        localStorage.clear();
+        navigate('/login', { replace: true });
+        return;
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Failed to load projects');
       setProjects(Array.isArray(data) ? data : (data.projects || []));
     } catch (e) {
-      console.error(e); setError(e.message || 'Failed to load projects'); setProjects([]);
-    } finally { setLoading(false); }
+      console.error(e);
+      setError(e.message || 'Failed to load projects');
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
   }, [authHeaders, navigate, showArchived]);
 
   useEffect(() => { fetchMyProjects(); }, [fetchMyProjects]);
 
-  /* -------- Delete (use /projects/:id) -------- */
+  /* -------- Delete -------- */
   const requestDelete = (id, title) => setDeleteTarget({ id, title });
 
   const confirmDelete = async () => {
@@ -145,13 +160,16 @@ export default function MyProjectsPage() {
       if (!res.ok) throw new Error(data?.message || 'Delete failed');
       await fetchMyProjects(); // keep in sync
     } catch (e) {
-      console.error(e); setError(e.message || 'Delete failed'); await fetchMyProjects();
+      console.error(e);
+      setError(e.message || 'Delete failed');
+      await fetchMyProjects();
     } finally {
-      setDeleting(false); setDeleteTarget(null);
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
-  /* -------- Archive / Unarchive (use /projects/:id/...) -------- */
+  /* -------- Archive / Unarchive -------- */
   const archiveProject = async (projectId) => {
     try {
       const res = await fetch(`${API}/projects/${projectId}/archive`, {
@@ -163,7 +181,10 @@ export default function MyProjectsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Archive failed');
       await fetchMyProjects();
-    } catch (e) { console.error(e); setError(e.message || 'Archive failed'); }
+    } catch (e) {
+      console.error(e);
+      setError(e.message || 'Archive failed');
+    }
   };
 
   const unarchiveProject = async (projectId) => {
@@ -177,7 +198,10 @@ export default function MyProjectsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Unarchive failed');
       await fetchMyProjects();
-    } catch (e) { console.error(e); setError(e.message || 'Unarchive failed'); }
+    } catch (e) {
+      console.error(e);
+      setError(e.message || 'Unarchive failed');
+    }
   };
 
   const onCreate = () => navigate('/supervisor/create-project');
@@ -191,10 +215,15 @@ export default function MyProjectsPage() {
   );
 
   return (
-    <div className="sv-layout" style={{
-      backgroundImage: "url('/assets/login_background.png')",
-      backgroundRepeat: 'no-repeat', backgroundSize: 'cover', backgroundPosition: 'center',
-    }}>
+    <div
+      className="sv-layout"
+      style={{
+        backgroundImage: "url('/assets/login_background.png')",
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }}
+    >
       <SupervisorNav />
       <SupervisorHeader />
 
@@ -203,19 +232,32 @@ export default function MyProjectsPage() {
           <div className="page-inner">
             <div className="myproj-controls">
               <div className="seg-tabs">
-                <NavLink to="/supervisor/my-projects" end
+                <NavLink
+                  to="/supervisor/my-projects"
+                  end
                   className={({ isActive }) => `seg-btn ${isActive ? 'is-active' : ''}`}
                   onClick={() => setShowArchived(false)}
-                >Active</NavLink>
-                <NavLink to="/supervisor/my-projects/archived"
+                >
+                  Active
+                </NavLink>
+                <NavLink
+                  to="/supervisor/my-projects/archived"
                   className={({ isActive }) => `seg-btn ${isActive ? 'is-active' : ''}`}
                   onClick={() => setShowArchived(true)}
-                >Archived</NavLink>
+                >
+                  Archived
+                </NavLink>
               </div>
 
               <div className="controls-right">
-                <button className="btn btn-outline" onClick={fetchMyProjects}>Refresh</button>
-                {!showArchived && <button className="btn btn-primary" onClick={onCreate}>Create Project</button>}
+                <button className="btn btn-outline" onClick={fetchMyProjects}>
+                  Refresh
+                </button>
+                {!showArchived && (
+                  <button className="btn btn-primary" onClick={onCreate}>
+                    Create Project
+                  </button>
+                )}
               </div>
             </div>
 
@@ -245,7 +287,9 @@ export default function MyProjectsPage() {
                           <span className="chip chip--ghost">Student Proposal</span>
                         )}
 
-                        {Number(p.is_archived) === 1 && <span className="chip chip--archived">Archived</span>}
+                        {Number(p.is_archived) === 1 && (
+                          <span className="chip chip--archived">Archived</span>
+                        )}
                       </div>
 
                       <h3 className="project-title">{p.title}</h3>
@@ -261,8 +305,12 @@ export default function MyProjectsPage() {
                           {full ? 'Full' : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
                         </div>
                         <div className="numbers">
-                          <span>Quota: <strong>{quota}</strong></span>
-                          <span>Allocated: <strong>{allocated}</strong></span>
+                          <span>
+                            Quota: <strong>{quota}</strong>
+                          </span>
+                          <span>
+                            Allocated: <strong>{allocated}</strong>
+                          </span>
                         </div>
                       </div>
 
@@ -276,12 +324,34 @@ export default function MyProjectsPage() {
                         <div className="card-actions">
                           {!showArchived ? (
                             <>
-                              <button className="btn btn-outline" onClick={() => setEditId(p.project_id)}>Edit</button>
-                              <button className="btn btn-danger" onClick={() => requestDelete(p.project_id, p.title)}>Delete</button>
-                              <button className="btn btn-archive" onClick={() => archiveProject(p.project_id)} title="Move to archived">Archive</button>
+                              <button
+                                className="btn btn-outline"
+                                onClick={() => setEditId(p.project_id)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-danger"
+                                onClick={() => requestDelete(p.project_id, p.title)}
+                              >
+                                Delete
+                              </button>
+                              <button
+                                className="btn btn-archive"
+                                onClick={() => archiveProject(p.project_id)}
+                                title="Move to archived"
+                              >
+                                Archive
+                              </button>
                             </>
                           ) : (
-                            <button className="btn btn-outline" onClick={() => unarchiveProject(p.project_id)} title="Restore to active">Unarchive</button>
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => unarchiveProject(p.project_id)}
+                              title="Restore to active"
+                            >
+                              Unarchive
+                            </button>
                           )}
                         </div>
                       </div>
@@ -306,7 +376,11 @@ export default function MyProjectsPage() {
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete project"
-        message={deleteTarget ? `Delete “${deleteTarget.title || 'this project'}” permanently? This cannot be undone.` : ''}
+        message={
+          deleteTarget
+            ? `Delete “${deleteTarget.title || 'this project'}” permanently? This cannot be undone.`
+            : ''
+        }
         confirmText={deleting ? 'Deleting…' : 'Delete'}
         cancelText="Cancel"
         busy={deleting}

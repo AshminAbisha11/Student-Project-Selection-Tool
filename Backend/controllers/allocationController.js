@@ -3,23 +3,25 @@ const db = require('../config/db'); // mysql2/promise pool
 
 // ---------------- Config (tweakable weights) ----------------
 const WEIGHTS = {
-  preferencePoints: { 1: 100, 2: 80, 3: 60, 4: 40, 5: 20 },
-  contactedBonus: { Yes: 50, No: 0 },
-  timing: { maxStart: 30, perProjectStep: 3 },
+  preferencePoints: { 1: 100, 2: 85, 3: 70, 4: 55, 5: 40 },
+  contactedBonus: { Yes: 10, No: 0 },
+  timing: { maxStart: 20, perProjectStep: 2 },
 };
 
 // ---------------- Helpers ----------------
 const normContacted = (v) => {
-  if (v == null) return 'No';
-  const s = String(v).trim().toLowerCase();
-  return s === 'yes' ? 'Yes' : 'No';
+  const s = String(v ?? '').trim().toLowerCase();
+  return ['yes', 'y', 'true', '1'].includes(s) ? 'Yes' : 'No';
 };
 
 const scorePair = (prefOrder, contacted, rank) => {
   const prefPts = WEIGHTS.preferencePoints[Number(prefOrder)] || 0;
   const contactedPts = WEIGHTS.contactedBonus[normContacted(contacted)] || 0;
   const r = Math.max(1, Number(rank) || 1);
-  const timePts = Math.max(0, WEIGHTS.timing.maxStart - (r - 1) * WEIGHTS.timing.perProjectStep);
+  const timePts = Math.max(
+    0,
+    WEIGHTS.timing.maxStart - (r - 1) * WEIGHTS.timing.perProjectStep
+  );
   return prefPts + contactedPts + timePts;
 };
 
@@ -72,12 +74,9 @@ async function cycleExists(cycleId) {
 
 /** Resolve cycle to use: prefer middleware > explicit cycle_id > active > most recent. */
 async function resolveCycleId(req) {
-  if (req.cycleId) {
-    return { cycleId: Number(req.cycleId), source: 'middleware' };
-  }
+  if (req.cycleId) return { cycleId: Number(req.cycleId), source: 'middleware' };
 
   const raw = req.body?.cycle_id ?? req.query?.cycle_id ?? null;
-
   if (raw != null && String(raw).trim() !== '') {
     const cid = Number(raw);
     if (!Number.isInteger(cid) || cid <= 0 || !(await cycleExists(cid))) {
@@ -99,15 +98,19 @@ async function resolveCycleId(req) {
   throw err;
 }
 
+/**
+ * Load preferences for the cycle that point to APPROVED projects in the SAME cycle,
+ * excluding students already allocated in that cycle. De-duplicate per (student, project):
+ * keep the lower preference_order; ties → earlier submitted_at.
+ */
 async function loadEligiblePreferences(conn, cycleId) {
   // students already allocated this cycle (exclude)
   const [already] = await conn.query(
     `SELECT student_id FROM allocations WHERE cycle_id = ?`,
     [cycleId]
   );
-  const alreadySet = new Set(already.map(r => r.student_id));
+  const alreadySet = new Set(already.map((r) => r.student_id));
 
-  // preferences that point to APPROVED projects in SAME cycle
   const [rows] = await conn.query(
     `
     SELECT
@@ -130,12 +133,34 @@ async function loadEligiblePreferences(conn, cycleId) {
     [cycleId, cycleId]
   );
 
-  return rows.filter(r => !alreadySet.has(r.student_id));
+  const filtered = rows.filter((r) => !alreadySet.has(r.student_id));
+
+  // De-duplicate by (student_id, project_id)
+  const best = new Map();
+  for (const r of filtered) {
+    const key = `${r.student_id}:${r.project_id}`;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, r);
+      continue;
+    }
+    const currOrder = Number(r.preference_order ?? 99);
+    const prevOrder = Number(prev.preference_order ?? 99);
+    if (
+      currOrder < prevOrder ||
+      (currOrder === prevOrder &&
+        new Date(r.submitted_at || 0) < new Date(prev.submitted_at || 0))
+    ) {
+      best.set(key, r);
+    }
+  }
+
+  return [...best.values()];
 }
 
 // capacities are CYCLE-SCOPED
 async function loadCapacities(conn, cycleId) {
-  // 1) Read total quota per supervisor from supervisor_meta
+  // 1) supervisor_meta (optional)
   let supQuotaRows = [];
   try {
     [supQuotaRows] = await conn.query(
@@ -155,10 +180,10 @@ async function loadCapacities(conn, cycleId) {
   }
 
   const supervisorQuota = new Map(
-    supQuotaRows.map(r => [Number(r.supervisor_id), Number(r.quota_total || 0)])
+    supQuotaRows.map((r) => [Number(r.supervisor_id), Number(r.quota_total || 0)])
   );
 
-  // 2) Count allocations per supervisor in THIS cycle
+  // 2) current load per supervisor in THIS cycle
   const [supLoad] = await conn.query(
     `
     SELECT pr.supervisor_id, COUNT(*) AS c
@@ -169,12 +194,23 @@ async function loadCapacities(conn, cycleId) {
     `,
     [cycleId]
   );
-
   const supervisorAllocated = new Map(
-    supLoad.map(r => [Number(r.supervisor_id), Number(r.c)])
+    supLoad.map((r) => [Number(r.supervisor_id), Number(r.c)])
   );
 
-  return { supervisorQuota, supervisorAllocated };
+  // 3) Fallback capacity: sum of this cycle's project quotas per supervisor
+  const [perSupQuota] = await conn.query(
+    `SELECT supervisor_id, COALESCE(SUM(quota),0) AS q
+       FROM projects
+      WHERE cycle_id = ?
+      GROUP BY supervisor_id`,
+    [cycleId]
+  );
+  const sumProjectQuota = new Map(
+    perSupQuota.map((r) => [Number(r.supervisor_id), Number(r.q)])
+  );
+
+  return { supervisorQuota, supervisorAllocated, sumProjectQuota };
 }
 
 function rankBySubmissionWithinProject(prefs) {
@@ -184,8 +220,12 @@ function rankBySubmissionWithinProject(prefs) {
     byProject.get(r.project_id).push(r);
   }
   for (const arr of byProject.values()) {
-    arr.sort((a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0));
-    arr.forEach((r, i) => { r.rankWithinProject = i + 1; });
+    arr.sort(
+      (a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0)
+    );
+    arr.forEach((r, i) => {
+      r.rankWithinProject = i + 1;
+    });
   }
   return prefs;
 }
@@ -203,7 +243,8 @@ function sortCandidates(cands) {
 }
 
 function greedySelect(candidates, capacities) {
-  const { supervisorQuota, supervisorAllocated } = capacities;
+  const { supervisorQuota, supervisorAllocated, sumProjectQuota } = capacities;
+
   const projectRemaining = new Map();
   const supervisorRemaining = new Map();
   const assigned = new Set();
@@ -211,13 +252,17 @@ function greedySelect(candidates, capacities) {
 
   for (const c of candidates) {
     if (!projectRemaining.has(c.project_id)) {
-      const left = Math.max(0, (Number(c.quota) || 0) - (Number(c.spots_filled) || 0));
+      const left = Math.max(
+        0,
+        (Number(c.quota) || 0) - (Number(c.spots_filled) || 0)
+      );
       projectRemaining.set(c.project_id, left);
     }
     if (!supervisorRemaining.has(c.supervisor_id)) {
-      const cap =
-        (supervisorQuota.get(c.supervisor_id) || 0) -
-        (supervisorAllocated.get(c.supervisor_id) || 0);
+      const base = supervisorQuota.has(c.supervisor_id)
+        ? supervisorQuota.get(c.supervisor_id)
+        : (sumProjectQuota.get(c.supervisor_id) ?? Infinity);
+      const cap = base - (supervisorAllocated.get(c.supervisor_id) || 0);
       supervisorRemaining.set(c.supervisor_id, Math.max(0, cap));
     }
   }
@@ -254,10 +299,14 @@ exports.preview = async (req, res) => {
     }
 
     prefs = rankBySubmissionWithinProject(prefs);
-    const candidates = prefs.map(r => ({
+    const candidates = prefs.map((r) => ({
       ...r,
       contacted_supervisor: normContacted(r.contacted_supervisor),
-      score: scorePair(r.preference_order, r.contacted_supervisor, r.rankWithinProject),
+      score: scorePair(
+        r.preference_order,
+        r.contacted_supervisor,
+        r.rankWithinProject
+      ),
     }));
 
     const selected = greedySelect(
@@ -309,10 +358,14 @@ exports.commit = async (req, res) => {
 
     let prefs = await loadEligiblePreferences(conn, cycleId);
     prefs = rankBySubmissionWithinProject(prefs);
-    const candidates = prefs.map(r => ({
+    const candidates = prefs.map((r) => ({
       ...r,
       contacted_supervisor: normContacted(r.contacted_supervisor),
-      score: scorePair(r.preference_order, r.contacted_supervisor, r.rankWithinProject),
+      score: scorePair(
+        r.preference_order,
+        r.contacted_supervisor,
+        r.rankWithinProject
+      ),
     }));
     const toCommit = greedySelect(
       sortCandidates(candidates),
@@ -321,7 +374,7 @@ exports.commit = async (req, res) => {
 
     let inserted = 0;
     for (const a of toCommit) {
-      // double-check student hasn't been allocated in THIS cycle
+      // Guard: student not already allocated in THIS cycle
       const [s] = await conn.query(
         `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
         [a.student_id, cycleId]
@@ -331,7 +384,11 @@ exports.commit = async (req, res) => {
       const didInsert = await tryInsertAllocation(conn, a, cycleId);
       if (!didInsert) continue;
 
-      // keep spots_filled in sync only when we actually inserted
+      // Lock and bump the project row (safer under concurrency)
+      await conn.query(
+        `SELECT project_id FROM projects WHERE project_id = ? FOR UPDATE`,
+        [a.project_id]
+      );
       await conn.query(
         `UPDATE projects
            SET spots_filled = LEAST(spots_filled + 1, quota)
@@ -388,12 +445,12 @@ exports.allocate = async (req, res) => {
       `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
       [student_id, cycleId]
     );
-    if (existsStudent.length) {
-      throw new Error('Student already allocated to a project for this cycle');
-    }
+    if (existsStudent.length) throw new Error('Student already allocated to a project for this cycle');
 
     const [rows] = await conn.query(
-      'SELECT project_id, supervisor_id, quota, spots_filled FROM projects WHERE project_id = ? FOR UPDATE',
+      `SELECT project_id, supervisor_id, quota, spots_filled
+         FROM projects
+        WHERE project_id = ? FOR UPDATE`,
       [project_id]
     );
     if (!rows.length) throw new Error('Project not found');
@@ -476,7 +533,7 @@ exports.acceptStudentIdea = async (req, res) => {
 
     const { cycleId } = await resolveCycleId(req);
 
-    // 1) Lock proposal (do not require proposals.cycle_id column)
+    // 1) Lock proposal
     const [propRows] = await conn.query(
       `
       SELECT p.proposal_id, p.student_id, p.supervisor_id, p.project_id, p.status
@@ -691,7 +748,6 @@ exports.getOne = async (req, res) => {
 };
 
 // ---------------- Student: get my allocation (latest committed cycle) ----------------
-// Student: get my allocation (prefer latest committed cycle; fallback to any cycle)
 exports.myAllocationForStudent = async (req, res) => {
   try {
     const sid = req.user.user_id;
