@@ -40,6 +40,22 @@ const pwStrong = (s) =>
 const normalizeEmail = (e) => String(e || '').trim().toLowerCase();
 const emailDomain = (e) => normalizeEmail(e).split('@')[1] || '';
 
+// at the top of the file
+const validator = require('validator');
+
+function normalizeEmailKeepPlus(raw) {
+  const e = String(raw || '').trim();
+  if (!e) return '';
+  return validator.normalizeEmail(e, {
+    gmail_remove_dots: false,
+    gmail_remove_subaddress: false,
+    outlookdotcom_remove_subaddress: false,
+    yahoo_remove_subaddress: false,
+    icloud_remove_subaddress: false,
+  }) || e.toLowerCase(); 
+}
+
+
 /* ========== ADMIN SIGNUP ==========
  * POST /auth/admin-signup
  * Body: { name, email, password, inviteCode? }
@@ -255,36 +271,33 @@ exports.registerUser = async (req, res) => {
   try {
     let { name, email, password, confirmPassword, programme, role } = req.body || {};
     name = String(name || '').trim();
-    email = normalizeEmail(email);
+    email = normalizeEmailKeepPlus(email);    // <-- keep +alias
     role = String(role || '').trim().toLowerCase();
 
     if (!name || !email || !password || !confirmPassword || !role) {
       return res.status(400).json({ message: 'All fields are required.' });
     }
     if (role === 'student' && !programme) {
-      return res
-        .status(400)
-        .json({ message: 'Programme is required for students.' });
+      return res.status(400).json({ message: 'Programme is required for students.' });
     }
     if (role !== 'student') programme = null;
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // allow '+' in the local part
+    const emailRegex = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ message: 'Invalid email format.' });
     }
+
     if (!pwStrong(password)) {
       return res.status(400).json({
-        message:
-          'Password must be at least 8 characters, with upper, lower, number and special character.',
+        message: 'Password must be at least 8 characters, with upper, lower, number and special character.',
       });
     }
     if (password !== confirmPassword) {
       return res.status(400).json({ message: 'Passwords do not match.' });
     }
 
-    const [existing] = await db.query('SELECT user_id FROM users WHERE email = ?', [
-      email,
-    ]);
+    const [existing] = await db.query('SELECT user_id FROM users WHERE email = ?', [email]);
     if (existing.length) {
       return res.status(400).json({ message: 'Email already registered.' });
     }

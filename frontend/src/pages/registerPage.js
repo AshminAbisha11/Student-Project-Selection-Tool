@@ -1,11 +1,14 @@
+// src/pages/RegisterPage.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './registerPage.css';
 
-const API_BASE = 'http://localhost:5000'; // change if needed
+const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const SIGNUP_PATH = '/signup';   // backend route you mounted: app.use('/signup', registerRoutes)
+const LOGIN_PATH  = '/login';    // change to '/auth/login' if that's your login route
 
-const RegisterPage = () => {
+export default function RegisterPage() {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -21,14 +24,13 @@ const RegisterPage = () => {
   const [errorMsg, setErrorMsg] = useState('');
 
   const isStudent = formData.role?.toLowerCase() === 'student';
-  const isSupervisor = formData.role?.toLowerCase() === 'supervisor';
 
-  // client-side helpers
+  // Allow +aliases and a broad set of valid emails (matches backend)
   const emailOk = (email) =>
-    /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email.trim());
+    /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test((email || '').trim());
 
   const passwordStrong = (pw) =>
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*]).{8,}$/.test(pw);
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%\^&\*]).{8,}$/.test(pw || '');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -42,25 +44,37 @@ const RegisterPage = () => {
     setFormData((prev) => ({
       ...prev,
       role: value,
-      programme: value.toLowerCase() === 'supervisor' ? '' : prev.programme, // clear programme if supervisor
+      programme: value.toLowerCase() === 'student' ? prev.programme : '', // clear programme unless student
     }));
+  };
+
+  const autoLogin = async (email, password, fallbackRole) => {
+    const { data } = await axios.post(`${API_BASE}${LOGIN_PATH}`, { email, password });
+    // Persist auth like the rest of the app expects
+    if (data?.token) localStorage.setItem('token', data.token);
+    if (data?.user)  localStorage.setItem('user', JSON.stringify(data.user));
+
+    const role = (data?.user?.role || fallbackRole || '').toLowerCase();
+    if (role === 'student') navigate('/student-dashboard');
+    else if (role === 'supervisor') navigate('/supervisor-dashboard');
+    else navigate('/admin'); // adjust if you have a different admin landing page
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (submitting) return; // guard against rapid double-clicks
+    if (submitting) return;
     setErrorMsg('');
 
     const payload = {
-      name: formData.name.trim(),
-      email: formData.email.trim(),
+      name: (formData.name || '').trim(),
+      email: (formData.email || '').trim(), // backend preserves +aliases
       password: formData.password,
       confirmPassword: formData.confirmPassword,
-      role: formData.role.trim(),
-      programme: isStudent ? formData.programme : null, // only for students
+      role: (formData.role || '').trim(),
+      programme: isStudent ? formData.programme : null,
     };
 
-    // basic validations (server will re-validate)
+    // Client-side validation (server re-validates)
     if (!payload.name || !payload.email || !payload.password || !payload.confirmPassword || !payload.role) {
       setErrorMsg('Please fill out all required fields.');
       return;
@@ -70,9 +84,7 @@ const RegisterPage = () => {
       return;
     }
     if (!passwordStrong(payload.password)) {
-      setErrorMsg(
-        'Password must be at least 8 characters and include uppercase, lowercase, number, and special character.'
-      );
+      setErrorMsg('Password must be at least 8 characters and include uppercase, lowercase, number, and special character.');
       return;
     }
     if (payload.password !== payload.confirmPassword) {
@@ -86,13 +98,11 @@ const RegisterPage = () => {
 
     try {
       setSubmitting(true);
-      await axios.post(`${API_BASE}/signup`, payload);
+      // 1) Create the account
+      await axios.post(`${API_BASE}${SIGNUP_PATH}`, payload);
 
-      // Navigate by role (or to /login if you prefer)
-      const role = payload.role.toLowerCase();
-      if (role === 'student') navigate('/student-dashboard');
-      else if (role === 'supervisor') navigate('/supervisor-dashboard');
-      else navigate('/login');
+      // 2) Auto-login and redirect to the correct dashboard
+      await autoLogin(payload.email, payload.password, payload.role);
     } catch (err) {
       const msg = err.response?.data?.message || 'Registration failed. Please try again.';
       setErrorMsg(msg);
@@ -102,7 +112,7 @@ const RegisterPage = () => {
   };
 
   const handleSignInClick = () => navigate('/login');
-  const goAdminSignup = () => navigate('/admin-signup'); // if you have this route
+  const goAdminSignup = () => navigate('/admin-signup');
 
   return (
     <div
@@ -149,8 +159,10 @@ const RegisterPage = () => {
               required
               autoComplete="email"
               disabled={submitting}
+              pattern="^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"
+              title="Example: username+alias@gmail.com"
             />
-            <small className="hint">We accept Gmail and aston.ac.uk emails.</small>
+            <small className="hint">We accept Gmail (including +aliases) and aston.ac.uk emails.</small>
 
             <label htmlFor="password">Password:</label>
             <input
@@ -237,6 +249,4 @@ const RegisterPage = () => {
       </div>
     </div>
   );
-};
-
-export default RegisterPage;
+}
