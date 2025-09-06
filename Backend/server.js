@@ -29,7 +29,7 @@ const cycleRoutes = require('./routes/cycleRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const adminRegisterRoutes = require('./routes/adminRegisterRoutes');
 const adminLoginRoutes = require('./routes/adminLoginRoutes');
-
+const reportRoutes = require("./routes/reportRoutes");
 
 
 const app = express();
@@ -92,6 +92,8 @@ app.use('/supervisor', supervisorRoutes);
 app.use('/admin', adminRoutes);
 app.use('/admin-signup', adminRegisterRoutes);
 app.use('/admin-login', adminLoginRoutes);
+app.use('/reports', reportRoutes);
+
 
 
 

@@ -62,7 +62,7 @@ function useConfirm() {
 }
 
 /* ===========================
-   Basic content modal (for two-step flow)
+   Basic content modal (two-step flow & report modal)
    =========================== */
 function BasicModal({ open, title, children, actions }) {
   if (!open) return null;
@@ -107,6 +107,29 @@ async function apiFetch(path, opts = {}) {
   return data;
 }
 
+/** Download helper for CSV reports (with auth) */
+async function apiDownload(path) {
+  const token = localStorage.getItem("token");
+  const res = await fetch(`${API}${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    // try to surface a helpful message instead of dumping HTML
+    try {
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const j = await res.json();
+        throw new Error(j?.message || "Download failed");
+      }
+      const t = await res.text();
+      throw new Error(t?.slice(0, 200) || "Download failed");
+    } catch (e) {
+      throw new Error(e?.message || "Download failed");
+    }
+  }
+  return await res.blob();
+}
+
 const toLocalInput = (sqlDateTime) =>
   sqlDateTime ? String(sqlDateTime).replace(" ", "T").slice(0, 16) : "";
 const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : "—");
@@ -120,8 +143,10 @@ const fmtHMS = (s) => {
 };
 
 export default function AdminAllocationPage() {
-  const [confirm, confirmModal] = useConfirm();          // confirm hook (force delete, single-step confirm)
+  const [confirm, confirmModal] = useConfirm();          // confirm hook
   const [activeModal, setActiveModal] = useState(null);  // null | 'commitCycle' | 'commitAlloc'
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportType, setReportType] = useState("allocations"); // 'allocations' | 'supervisor-load'
 
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -172,6 +197,12 @@ export default function AdminAllocationPage() {
   useEffect(() => {
     loadStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-open the report modal via /admin/allocations?report=1
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("report") === "1") setReportOpen(true);
   }, []);
 
   // Countdown
@@ -360,6 +391,32 @@ export default function AdminAllocationPage() {
       setErr(e.message);
     } finally {
       setCommitting(false);
+    }
+  };
+
+  /* ================
+     Report generation (CSV download)
+     ================ */
+  const handleDownloadReport = async () => {
+    try {
+      const id = status?.cycle?.cycle_id;
+      if (!id) throw new Error("No active cycle");
+      const path =
+        reportType === "allocations"
+          ? `/reports/allocations.csv?cycle_id=${id}`
+          : `/reports/supervisor-load.csv?cycle_id=${id}`;
+      const blob = await apiDownload(path);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${reportType}_cycle_${id}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setReportOpen(false);
+    } catch (e) {
+      setErr(e.message);
     }
   };
 
@@ -668,8 +725,8 @@ export default function AdminAllocationPage() {
             </>
           )}
 
-          {err && <div className="adbd-alert adbd-alert--error">{err}</div>}
-          {ok && <div className="adbd-alert adbd-alert--ok">{ok}</div>}
+          {err && <div className="adbd-alert adbd-alert--error" role="alert">{err}</div>}
+          {ok && <div className="adbd-alert adbd-alert--ok" role="status">{ok}</div>}
         </section>
 
         {/* Allocation Run */}
@@ -684,6 +741,17 @@ export default function AdminAllocationPage() {
               >
                 {previewing ? "Previewing…" : "Preview"}
               </button>
+
+              {/* Generate report */}
+              <button
+                className="adbd-btn adbd-btn--ghost"
+                onClick={() => setReportOpen(true)}
+                disabled={!status?.cycle?.cycle_id}
+                title={!status?.cycle?.cycle_id ? "No active cycle" : ""}
+              >
+                Generate report
+              </button>
+
               <button
                 className="adbd-btn adbd-btn--primary"
                 onClick={async () => {
@@ -765,7 +833,47 @@ export default function AdminAllocationPage() {
         </p>
       </BasicModal>
 
-      {/* Single confirm modal (force delete / right-panel commit confirm) */}
+      {/* Report modal */}
+      <BasicModal
+        open={reportOpen}
+        title="Generate report"
+        actions={[
+          <button key="cancel" className="adbd-btn adbd-btn--ghost" onClick={() => setReportOpen(false)}>Cancel</button>,
+          <button key="dl" className="adbd-btn adbd-btn--primary" onClick={handleDownloadReport}>
+            Download CSV
+          </button>,
+        ]}
+      >
+        <div style={{ display: "grid", gap: 10 }}>
+          <label className="adbd-radio" style={{ display: "flex", alignItems: "center" }}>
+            <input
+              type="radio"
+              name="reportType"
+              value="allocations"
+              checked={reportType === "allocations"}
+              onChange={() => setReportType("allocations")}
+            />
+            <span style={{ marginLeft: 8 }}>
+              Allocations — one row per student (student, project, supervisor)
+            </span>
+          </label>
+
+          <label className="adbd-radio" style={{ display: "flex", alignItems: "center" }}>
+            <input
+              type="radio"
+              name="reportType"
+              value="supervisor-load"
+              checked={reportType === "supervisor-load"}
+              onChange={() => setReportType("supervisor-load")}
+            />
+            <span style={{ marginLeft: 8 }}>
+              Supervisor load — number of allocated students per supervisor
+            </span>
+          </label>
+        </div>
+      </BasicModal>
+
+      {/* Single confirm modal (force delete / single-step confirms) */}
       {confirmModal}
     </AdminLayout>
   );
