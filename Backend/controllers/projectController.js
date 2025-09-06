@@ -1,16 +1,16 @@
-  // controllers/projectController.js
-  const db = require('../config/db');
+// controllers/projectController.js
+const db = require('../config/db');
 
-  /* -----------------------------
-    Helpers
-  ------------------------------ */
-  const STUDENT_IDEA_TOPIC_NAME = 'Student Proposal Ideas';
+/* -----------------------------
+  Helpers
+------------------------------ */
+const STUDENT_IDEA_TOPIC_NAME = 'Student Proposal Ideas';
 
-  const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
-  const isStudentIdeaTopic = (topic) =>
-    normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
+const normalize = (s) => (s ?? '').toString().trim().toLowerCase();
+const isStudentIdeaTopic = (topic) =>
+  normalize(topic) === normalize(STUDENT_IDEA_TOPIC_NAME);
 
-  async function getMostRecentCycleId() {
+async function getMostRecentCycleId() {
   const [r] = await db.query(`
     SELECT cycle_id
     FROM allocation_cycles
@@ -18,6 +18,37 @@
     LIMIT 1
   `);
   return r.length ? r[0].cycle_id : null;
+}
+
+// Strictly "open" by status (what students should use)
+async function getOpenCycleId() {
+  const [r] = await db.query(`
+    SELECT cycle_id
+    FROM allocation_cycles
+    WHERE status='open'
+    ORDER BY submission_open_at DESC
+    LIMIT 1
+  `);
+  return r.length ? r[0].cycle_id : null;
+}
+
+// "Active" is a bit looser (status open or current datetime in window)
+async function getActiveCycleId() {
+  const [byStatus] = await db.query(`
+    SELECT cycle_id FROM allocation_cycles
+    WHERE status='open'
+    ORDER BY submission_open_at DESC
+    LIMIT 1
+  `);
+  if (byStatus.length) return byStatus[0].cycle_id;
+
+  const [byDate] = await db.query(`
+    SELECT cycle_id FROM allocation_cycles
+    WHERE NOW() BETWEEN submission_open_at AND submission_close_at
+    ORDER BY submission_open_at DESC
+    LIMIT 1
+  `);
+  return byDate.length ? byDate[0].cycle_id : null;
 }
 
 async function resolveSupervisorCycleFilter(req) {
@@ -32,78 +63,46 @@ async function resolveSupervisorCycleFilter(req) {
   return { cycleId: recent, source: 'recent' };
 }
 
+const parseBool = (v, def = false) => {
+  if (v === undefined || v === null) return def;
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+};
 
-  // Strictly "open" by status (what students should use)
-  async function getOpenCycleId() {
-    const [r] = await db.query(`
-      SELECT cycle_id
-      FROM allocation_cycles
-      WHERE status='open'
-      ORDER BY submission_open_at DESC
-      LIMIT 1
-    `);
-    return r.length ? r[0].cycle_id : null;
-  }
+/* -------------------------------------------
+  Public browse columns/joins
+  - projects.supervisor_id -> users.user_id
+-------------------------------------------- */
+const baseColumns = `
+  p.project_id,
+  p.title,
+  p.description,
+  p.topic,
+  p.keywords,
+  p.quota,
+  p.spots_filled,
+  GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
+  p.approval_status,
+  p.is_student_proposal,
+  p.is_student_pool,
+  p.cycle_id,
+  p.created_at,
+  p.updated_at,
+  p.is_archived,
 
-  // "Active" is a bit looser (status open or current datetime in window)
-  async function getActiveCycleId() {
-    const [byStatus] = await db.query(`
-      SELECT cycle_id FROM allocation_cycles
-      WHERE status='open'
-      ORDER BY submission_open_at DESC
-      LIMIT 1
-    `);
-    if (byStatus.length) return byStatus[0].cycle_id;
+  u.user_id AS supervisor_id,
+  COALESCE(u.name, p.supervisor_name)  AS supervisor_name,
+  u.email  AS supervisor_email
+`;
 
-    const [byDate] = await db.query(`
-      SELECT cycle_id FROM allocation_cycles
-      WHERE NOW() BETWEEN submission_open_at AND submission_close_at
-      ORDER BY submission_open_at DESC
-      LIMIT 1
-    `);
-    return byDate.length ? byDate[0].cycle_id : null;
-  }
+const baseJoins = `
+  LEFT JOIN users u ON u.user_id = p.supervisor_id
+`;
 
-  const parseBool = (v, def = false) => {
-    if (v === undefined || v === null) return def;
-    const s = String(v).trim().toLowerCase();
-    return s === '1' || s === 'true' || s === 'yes';
-  };
-
-  /* -------------------------------------------
-    Public browse columns/joins
-    - projects.supervisor_id -> users.user_id
-  -------------------------------------------- */
-  const baseColumns = `
-    p.project_id,
-    p.title,
-    p.description,
-    p.topic,
-    p.keywords,
-    p.quota,
-    p.spots_filled,
-    GREATEST(p.quota - p.spots_filled, 0) AS quota_remaining,
-    p.approval_status,
-    p.is_student_proposal,
-    p.is_student_pool,
-    p.cycle_id,
-    p.created_at,
-    p.updated_at,
-    p.is_archived,
-
-    u.user_id AS supervisor_id,
-    COALESCE(u.name, p.supervisor_name)  AS supervisor_name,
-    u.email  AS supervisor_email
-  `;
-
-  const baseJoins = `
-    LEFT JOIN users u ON u.user_id = p.supervisor_id
-  `;
-
-  /* ========================================================
-  * PUBLIC / STUDENT BROWSE (only when a cycle is OPEN)
-  * ====================================================== */
-  exports.listForStudents = async (req, res) => {
+/* ========================================================
+ * PUBLIC / STUDENT BROWSE (only when a cycle is OPEN)
+ * ====================================================== */
+exports.listForStudents = async (req, res) => {
   try {
     // strict: only 'open' status counts
     const openCycleId = await getOpenCycleId();
@@ -152,12 +151,13 @@ async function resolveSupervisorCycleFilter(req) {
       FROM projects p
       ${baseJoins}
       WHERE ${clauses.join(' AND ')}
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       LIMIT ? OFFSET ?
       `,
       [...params, lim, off]
     );
 
+    res.set('Cache-Control', 'no-store');
     res.json({
       cycle_id: openCycleId,
       count: rows?.length || 0,
@@ -168,6 +168,7 @@ async function resolveSupervisorCycleFilter(req) {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 /* ========================================================
  * PUBLIC / SEARCH (admin/dev use; not cycle-gated)
  * ====================================================== */
@@ -179,9 +180,10 @@ exports.getAllProjects = async (_req, res) => {
       FROM projects p
       ${baseJoins}
       WHERE p.is_archived = 0
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `
     );
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error fetching all projects:', error);
@@ -211,6 +213,7 @@ exports.getProjectDetails = async (req, res) => {
     );
 
     if (!rows.length) return res.status(404).json({ message: 'Project not found' });
+    res.set('Cache-Control', 'no-store');
     res.status(200).json(rows[0]);
   } catch (error) {
     console.error('Error fetching project details:', error);
@@ -228,10 +231,11 @@ exports.filterBySupervisor = async (req, res) => {
       ${baseJoins}
       WHERE p.is_archived = 0
         AND LOWER(TRIM(COALESCE(u.name, p.supervisor_name))) = LOWER(TRIM(?))
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `,
       [supervisor]
     );
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error filtering by supervisor:', error);
@@ -249,10 +253,11 @@ exports.filterByTopic = async (req, res) => {
       ${baseJoins}
       WHERE p.is_archived = 0
         AND LOWER(TRIM(p.topic)) = LOWER(TRIM(?))
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `,
       [topic]
     );
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error filtering by topic:', error);
@@ -274,10 +279,11 @@ exports.filterByKeyword = async (req, res) => {
       ${baseJoins}
       WHERE p.is_archived = 0
         AND p.keywords LIKE ?
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `,
       [`%${keyword}%`]
     );
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error filtering by keyword:', error);
@@ -314,11 +320,12 @@ exports.multiFilteredProjects = async (req, res) => {
       FROM projects p
       ${baseJoins}
       WHERE ${clauses.join(' AND ')}
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `,
       params
     );
 
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error in multi-filter:', error);
@@ -357,10 +364,11 @@ exports.searchProjects = async (req, res) => {
       FROM projects p
       ${baseJoins}
       WHERE ${where.join(' AND ')}
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
     `;
 
     const [rows] = await db.execute(sql, params);
+    res.set('Cache-Control', 'no-store');
     res.status(200).json({ projects: rows ?? [], count: rows?.length ?? 0 });
   } catch (error) {
     console.error('Error searching projects:', error);
@@ -415,11 +423,12 @@ exports.getMyProjects = async (req, res) => {
         GROUP BY project_id
       ) a ON a.project_id = p.project_id
       ${where}
-      ORDER BY p.created_at DESC, p.project_id DESC
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.project_id DESC
       `,
       params
     );
 
+    res.set('Cache-Control', 'no-store');
     res.json({
       meta: {
         cycle_filter: cycleId,      // null means "all"
@@ -434,7 +443,6 @@ exports.getMyProjects = async (req, res) => {
     res.status(500).json({ message: 'Database error' });
   }
 };
-
 
 exports.getMyProjectById = async (req, res) => {
   const supervisorId = req.user?.user_id;
@@ -466,6 +474,7 @@ exports.getMyProjectById = async (req, res) => {
       [id]
     );
 
+    res.set('Cache-Control', 'no-store');
     return res.json(row || null);
   } catch (err) {
     console.error('getMyProjectById error:', err);
@@ -579,6 +588,7 @@ exports.updateMyProject = async (req, res) => {
       [id]
     );
 
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Project updated.', project: updated });
   } catch (err) {
     await conn.rollback();
@@ -692,6 +702,7 @@ exports.createProject = async (req, res) => {
       );
 
       const drafted = project.cycle_id == null;
+      res.set('Cache-Control', 'no-store');
       return res.status(201).json({
         message: drafted
           ? 'Project created as a draft (no active cycle). It will appear to students once a cycle is opened.'
@@ -736,6 +747,7 @@ exports.archiveProject = async (req, res) => {
     );
     if (!upd.affectedRows) return res.status(500).json({ message: 'Archive failed' });
 
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Project archived' });
   } catch (err) {
     console.error('archiveProject error:', err);
@@ -761,6 +773,7 @@ exports.unarchiveProject = async (req, res) => {
     );
     if (!upd.affectedRows) return res.status(500).json({ message: 'Unarchive failed' });
 
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Project restored' });
   } catch (err) {
     console.error('unarchiveProject error:', err);
@@ -817,6 +830,7 @@ exports.deleteMyProject = async (req, res) => {
     }
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Project deleted' });
   } catch (err) {
     await conn.rollback();

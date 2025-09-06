@@ -17,6 +17,10 @@ const initialForm = {
   quota: '',
 };
 
+/* ---------- tiny util ---------- */
+const isStudentPoolTopic = (t) =>
+  String(t || '').trim().toLowerCase() === STUDENT_IDEA_TOPIC.toLowerCase();
+
 /* Fixed, full-bleed background rendered in JS */
 function SupervisorBg({ src = '/assets/login_background.png' }) {
   return (
@@ -37,6 +41,33 @@ function SupervisorBg({ src = '/assets/login_background.png' }) {
   );
 }
 
+/** Unified API helper with auth + 401/403 handling */
+async function apiFetch(path, opts = {}, navigate) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API}${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    try { navigate('/login', { replace: true }); } catch {}
+    let data = {};
+    try { data = await res.json(); } catch {}
+    throw new Error(data?.message || 'Your session has expired. Please log in again.');
+  }
+
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data?.message || 'Request failed');
+  return data;
+}
+
 export default function SupervisorCreateProjectPage() {
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
@@ -44,7 +75,10 @@ export default function SupervisorCreateProjectPage() {
 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
-  const user  = JSON.parse(localStorage.getItem('user') || 'null');
+  const user  = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
+    catch { return null; }
+  }, []);
 
   // Gate: must be logged in and be a supervisor
   useEffect(() => {
@@ -57,11 +91,6 @@ export default function SupervisorCreateProjectPage() {
     }
   }, [navigate, token, user]);
 
-  const authHeaders = useMemo(() => ({
-    'Content-Type': 'application/json',
-    Authorization: token ? `Bearer ${token}` : '',
-  }), [token]);
-
   const onChange = (e) => {
     const { name, value } = e.target;
     setError('');
@@ -70,7 +99,7 @@ export default function SupervisorCreateProjectPage() {
 
   // Auto-suggest title if Student Proposal pool is selected and title is blank
   useEffect(() => {
-    if (form.topic === STUDENT_IDEA_TOPIC && !form.title.trim()) {
+    if (isStudentPoolTopic(form.topic) && !form.title.trim()) {
       setForm((f) => ({ ...f, title: 'Student Proposed Ideas' }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,9 +110,8 @@ export default function SupervisorCreateProjectPage() {
     if (!form.topic.trim()) return 'Topic is required.';
     if (!form.description.trim()) return 'Short description is required.';
     if (!form.full_description.trim()) return 'Full description is required.';
-    if (!form.quota || isNaN(Number(form.quota)) || Number(form.quota) < 1) {
-      return 'Quota must be a number ≥ 1.';
-    }
+    const q = Number(form.quota);
+    if (!Number.isInteger(q) || q < 1) return 'Quota must be a whole number ≥ 1.';
     return '';
   };
 
@@ -92,45 +120,41 @@ export default function SupervisorCreateProjectPage() {
     const msg = validate();
     if (msg) return setError(msg);
 
-    if (!token) return setError('Please log in as a supervisor.');
-
     try {
       setSubmitting(true);
-      const res = await fetch(`${API}/projects/create-project`, {
+
+      // POST /projects/create-project (backend will attach to active cycle if present; otherwise create a draft)
+      const payload = {
+        title: form.title.trim(),
+        topic: form.topic.trim(),   // backend toggles student-idea pool via topic
+        description: form.description.trim(),
+        full_description: form.full_description.trim(),
+        prerequisites: form.prerequisites.trim(),
+        quota: Number(form.quota),
+      };
+
+      const data = await apiFetch('/projects/create-project', {
         method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({
-          title: form.title.trim(),
-          topic: form.topic.trim(),   // backend toggles student idea pool via topic
-          description: form.description.trim(),
-          full_description: form.full_description.trim(),
-          prerequisites: form.prerequisites.trim(),
-          quota: Number(form.quota),
-        }),
-      });
+        body: JSON.stringify(payload),
+      }, navigate);
 
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        if (res.status === 409) {
-          throw new Error(
-            data.message ||
-              'No active allocation cycle. Ask the admin to open a cycle before enabling Student Proposal Ideas.'
-          );
-        }
-        throw new Error(data.message || 'Failed to create project');
-      }
-
-      alert('Project created successfully!');
+      // The backend sends a helpful message about draft vs active
+      alert(data?.message || 'Project created successfully.');
       navigate('/supervisor/my-projects');
     } catch (err) {
-      setError(err.message || 'Failed to create project');
+      // If no active cycle and topic is student-pool, show clearer guidance
+      const isPool = isStudentPoolTopic(form.topic);
+      const friendly =
+        isPool && /no active|active cycle|cycle/i.test(err.message || '')
+          ? 'No active allocation cycle. Ask the admin to open a cycle before enabling Student Proposal Ideas.'
+          : err.message || 'Failed to create project';
+      setError(friendly);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const isStudentIdea = form.topic === STUDENT_IDEA_TOPIC;
+  const isStudentIdea = isStudentPoolTopic(form.topic);
 
   return (
     <div className="sv-layout">
@@ -202,7 +226,7 @@ export default function SupervisorCreateProjectPage() {
                 >
                   <strong>Student Proposal Ideas</strong> is an opt-in pool. Your <em>Quota</em>{' '}
                   below is the number of student ideas you’re willing to take this cycle.
-                  An active allocation cycle is required.
+                  An active allocation cycle is required for this to be visible to students.
                 </div>
               )}
 
@@ -260,6 +284,7 @@ export default function SupervisorCreateProjectPage() {
                     onChange={onChange}
                     placeholder="e.g., 2"
                     disabled={submitting}
+                    inputMode="numeric"
                   />
                 </div>
               </div>

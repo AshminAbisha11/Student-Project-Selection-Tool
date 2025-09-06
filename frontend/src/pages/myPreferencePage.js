@@ -1,3 +1,4 @@
+// src/pages/MyPreferencesPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './myPreferencePage.css';
@@ -6,24 +7,39 @@ import HeaderBar from '../components/headerBar';
 import EditOrderModal from '../components/editOrderModal';
 
 const MAX_PREFERENCES = 5;
-const API = 'http://localhost:5000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 /* Tiny modal used locally */
 function SubmitModal({ open, onClose, deadline, alreadySubmitted }) {
   if (!open) return null;
   const title = alreadySubmitted ? 'Submission updated ✅' : 'Preferences submitted ✅';
-  const note  = alreadySubmitted
-    ? 'We’ve updated your previously submitted preferences.'
-    : 'We’ve saved your current order.';
+  const note =
+    alreadySubmitted
+      ? 'We’ve updated your previously submitted preferences.'
+      : 'We’ve saved your current order.';
   return (
-    <div role="dialog" aria-modal="true" style={{
-      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.4)',
-      display: 'grid', placeItems: 'center'
-    }}>
-      <div style={{
-        width: 'min(520px, 92vw)', background: '#fff', color: '#222',
-        borderRadius: 14, padding: '20px 22px', boxShadow: '0 18px 50px rgba(0,0,0,.18)'
-      }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,.4)',
+        display: 'grid',
+        placeItems: 'center',
+      }}
+    >
+      <div
+        style={{
+          width: 'min(520px, 92vw)',
+          background: '#fff',
+          color: '#222',
+          borderRadius: 14,
+          padding: '20px 22px',
+          boxShadow: '0 18px 50px rgba(0,0,0,.18)',
+        }}
+      >
         <h3 style={{ margin: 0 }}>{title}</h3>
         <p style={{ marginTop: 8, lineHeight: 1.45 }}>
           {note} You can still change your preferences and submit again{' '}
@@ -67,61 +83,69 @@ export default function MyPreferencesPage() {
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
 
-  const authHeaders = useMemo(
-    () => ({ Authorization: `Bearer ${token}` }),
-    [token]
-  );
+  const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
-  // helper: extract a numeric cycle_id from whatever shape /cycle/status returns
-  const getActiveCycleId = () => {
-    const raw = cycle?.cycle_id ?? cycle?.id ?? cycle?.cycleId ?? null;
+  // helper: numeric cycle_id from /cycle/status payload
+  const getActiveCycleId = (c = cycle) => {
+    const raw = c?.cycle_id ?? c?.id ?? c?.cycleId ?? null;
     const n = Number(raw);
     return Number.isInteger(n) && n > 0 ? n : null;
   };
 
   const fetchCycleStatus = async () => {
     try {
-      const res = await fetch(`${API}/cycle/status`, { headers: authHeaders });
-      const data = await res.json();
+      const res = await fetch(`${API}/cycle/status`, { headers: authHeaders, cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
       setHasActiveCycle(Boolean(data?.hasActiveCycle));
       setIsSubmissionOpen(Boolean(data?.isSubmissionOpen));
       setCycle(data?.cycle || null);
     } catch (e) {
       console.error('Error fetching cycle status:', e);
+      setHasActiveCycle(false);
+      setIsSubmissionOpen(false);
+      setCycle(null);
     } finally {
       setCycleLoading(false);
     }
   };
 
-  const fetchPreferences = async () => {
+  const fetchPreferences = async (cycleId) => {
     try {
-      // backend defaults to active cycle if none provided, so plain GET is fine
-      const res = await fetch(`${API}/preferences`, { headers: authHeaders });
-      const data = await res.json();
+      const qs = cycleId ? `?cycle_id=${cycleId}` : '';
+      const res = await fetch(`${API}/preferences${qs}`, {
+        headers: authHeaders,
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => []);
       const list = Array.isArray(data)
         ? data.slice().sort((a, b) => a.preference_order - b.preference_order)
         : [];
       setPreferences(list);
     } catch (err) {
       console.error('Error fetching preferences:', err);
+      setPreferences([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Uses backend GET /preferences/submission (not /submitted)
-  const fetchSubmissionStatus = async () => {
+  // Uses backend GET /preferences/submission
+  const fetchSubmissionStatus = async (cycleId) => {
     try {
       const url = new URL(`${API}/preferences/submission`);
-      const cId = getActiveCycleId();
-      if (cId) url.searchParams.set('cycle_id', cId);
-      const res = await fetch(url, { headers: authHeaders });
-      if (!res.ok) return; // silently ignore if endpoint not present
-      const data = await res.json();
+      if (cycleId) url.searchParams.set('cycle_id', cycleId);
+      const res = await fetch(url, { headers: authHeaders, cache: 'no-store' });
+      if (!res.ok) {
+        setAlreadySubmitted(false);
+        setSubmittedAt(null);
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
       setAlreadySubmitted(Boolean(data?.submitted));
       setSubmittedAt(data?.submitted_at || null);
     } catch {
-      // ignore – assume not submitted
+      setAlreadySubmitted(false);
+      setSubmittedAt(null);
     }
   };
 
@@ -132,7 +156,7 @@ export default function MyPreferencesPage() {
         headers: authHeaders,
       });
       if (res.ok) {
-        await fetchPreferences();
+        await fetchPreferences(getActiveCycleId());
       } else {
         const t = await res.text();
         alert(`Delete failed: ${res.status} ${t}`);
@@ -143,16 +167,19 @@ export default function MyPreferencesPage() {
   };
 
   const updateContactedSupervisor = async (preferenceId, value) => {
+    // normalize to 'Yes' | 'No'
+    const v = String(value || '').trim().toLowerCase() === 'yes' ? 'Yes' : 'No';
+
     // optimistic update
-    setPreferences(prev =>
-      prev.map(p => p.preference_id === preferenceId ? { ...p, contacted_supervisor: value } : p)
+    setPreferences((prev) =>
+      prev.map((p) => (p.preference_id === preferenceId ? { ...p, contacted_supervisor: v } : p))
     );
 
     try {
       const res = await fetch(`${API}/preferences/contacted`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ preference_id: preferenceId, contacted_supervisor: value }),
+        body: JSON.stringify({ preference_id: preferenceId, contacted_supervisor: v }),
       });
       if (!res.ok) {
         const t = await res.text();
@@ -160,7 +187,7 @@ export default function MyPreferencesPage() {
       }
     } catch (err) {
       console.error(err);
-      await fetchPreferences(); // revert
+      await fetchPreferences(getActiveCycleId()); // revert from server truth
       alert('Could not update contacted flag.');
     }
   };
@@ -169,29 +196,36 @@ export default function MyPreferencesPage() {
   const submitPreferences = async () => {
     if (!isSubmissionOpen) return alert('Submission window is closed.');
     if (preferences.length === 0) return alert('Please add at least one preference.');
-    const incomplete = preferences.some(p => !p.contacted_supervisor || p.contacted_supervisor === '');
+    const incomplete = preferences.some(
+      (p) => !p.contacted_supervisor || p.contacted_supervisor === ''
+    );
     if (incomplete) return alert('Please choose Yes/No for all preferences.');
 
-    const cycle_id = getActiveCycleId(); // may be null if no active cycle
+    const cycle_id = getActiveCycleId(); // must be present
     if (!cycle_id) return alert('No active cycle found.');
 
     // ordered list of project_ids
-    const prefIds = preferences
+    const projIds = preferences
       .slice()
       .sort((a, b) => a.preference_order - b.preference_order)
-      .map(p => Number(p.project_id))
-      .filter(n => Number.isInteger(n) && n > 0);
+      .map((p) => Number(p.project_id))
+      .filter((n) => Number.isInteger(n) && n > 0);
 
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/preferences/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ cycle_id, preferences: prefIds }),
+        body: JSON.stringify({ cycle_id, preferences: projIds }),
       });
 
       const txt = await res.text();
-      let payload; try { payload = JSON.parse(txt); } catch { payload = { message: txt || '' }; }
+      let payload;
+      try {
+        payload = JSON.parse(txt);
+      } catch {
+        payload = { message: txt || '' };
+      }
       if (!res.ok) throw new Error(payload?.message || `Submit failed: ${res.status}`);
 
       // mark as submitted/updated and show modal
@@ -199,7 +233,7 @@ export default function MyPreferencesPage() {
       setSubmittedAt(new Date().toISOString());
       setShowSubmitModal(true);
 
-      await fetchPreferences();
+      await fetchPreferences(cycle_id);
     } catch (e) {
       console.error('Submit error:', e);
       alert(e.message || 'Submit failed');
@@ -209,15 +243,15 @@ export default function MyPreferencesPage() {
   };
 
   useEffect(() => {
-    // fetch cycle first, then others (status needs cycle when present)
     (async () => {
       await fetchCycleStatus();
-      await Promise.all([fetchPreferences(), fetchSubmissionStatus()]);
+      const cId = getActiveCycleId();
+      await Promise.all([fetchPreferences(cId), fetchSubmissionStatus(cId)]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Reorder helpers (backend PUT /preferences) ---
+  // --- Reorder helpers (backend handles full reorder from one call) ---
   const setOrder = (preference_id, preference_order) =>
     fetch(`${API}/preferences`, {
       method: 'PUT',
@@ -238,16 +272,12 @@ export default function MyPreferencesPage() {
 
     setSavingOrder(true);
     try {
-      const swapWith = preferences.find(p => p.preference_order === Number(newOrder));
-      const r1 = await setOrder(editingPref.preference_id, Number(newOrder));
-      if (!r1.ok) throw new Error('Failed to update order');
-
-      if (swapWith) {
-        const r2 = await setOrder(swapWith.preference_id, Number(editingPref.preference_order));
-        if (!r2.ok) throw new Error('Failed to swap order');
+      const r = await setOrder(editingPref.preference_id, Number(newOrder));
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(`Failed to update order: ${t}`);
       }
-
-      await fetchPreferences();
+      await fetchPreferences(getActiveCycleId());
       setEditingPref(null);
     } catch (e) {
       console.error(e);
@@ -263,7 +293,9 @@ export default function MyPreferencesPage() {
 
       <div className="pref-card__content">
         <h4 className="pref-title">{pref.title}</h4>
-        <p><strong>Supervisor:</strong> {pref.supervisor_name}</p>
+        <p>
+          <strong>Supervisor:</strong> {pref.supervisor_name}
+        </p>
         <p className="description">{pref.description}</p>
 
         <div className="contacted-field">
@@ -324,7 +356,9 @@ export default function MyPreferencesPage() {
 
   const filled = preferences.length;
   const emptySlots = Math.max(0, MAX_PREFERENCES - filled);
-  const allContactedSet = preferences.every(p => p.contacted_supervisor && p.contacted_supervisor !== '');
+  const allContactedSet = preferences.every(
+    (p) => p.contacted_supervisor && p.contacted_supervisor !== ''
+  );
 
   return (
     <div className="preferences-page">
@@ -338,10 +372,12 @@ export default function MyPreferencesPage() {
             {!cycleLoading && (
               <div
                 style={{
-                  padding: '10px 14px', borderRadius: 10, marginBottom: 12,
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  marginBottom: 12,
                   background: isSubmissionOpen ? '#e9f7ef' : '#fdecea',
                   color: isSubmissionOpen ? '#1e4620' : '#611a15',
-                  border: `1px solid ${isSubmissionOpen ? '#b7e0c7' : '#f5c6cb'}`
+                  border: `1px solid ${isSubmissionOpen ? '#b7e0c7' : '#f5c6cb'}`,
                 }}
               >
                 {hasActiveCycle ? (
@@ -369,16 +405,28 @@ export default function MyPreferencesPage() {
             <div className="preferences-wrapper">
               <div className="prefs-header">
                 <h2>My Preferences</h2>
-                <div className="pref-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className="pref-count">Preferences: {filled}/{MAX_PREFERENCES}</span>
+                <div
+                  className="pref-actions"
+                  style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                >
+                  <span className="pref-count">
+                    Preferences: {filled}/{MAX_PREFERENCES}
+                  </span>
 
                   {/* tiny pill that says "Submitted" if we already have a record */}
                   {alreadySubmitted && (
-                    <span style={{
-                      background: '#eef2ff', color: '#1e2a78', border: '1px solid #c7d2fe',
-                      padding: '6px 10px', borderRadius: 999, fontSize: 12
-                    }}>
-                      Submitted{submittedAt ? ` • ${new Date(submittedAt).toLocaleString()}` : ''}
+                    <span
+                      style={{
+                        background: '#eef2ff',
+                        color: '#1e2a78',
+                        border: '1px solid #c7d2fe',
+                        padding: '6px 10px',
+                        borderRadius: 999,
+                        fontSize: 12,
+                      }}
+                    >
+                      Submitted
+                      {submittedAt ? ` • ${new Date(submittedAt).toLocaleString()}` : ''}
                     </span>
                   )}
 
@@ -387,12 +435,16 @@ export default function MyPreferencesPage() {
                     onClick={submitPreferences}
                     disabled={submitting || filled === 0 || !allContactedSet || !isSubmissionOpen}
                     title={
-                      !isSubmissionOpen ? 'Window closed'
-                      : !allContactedSet ? 'Select Yes/No for all items'
-                      : alreadySubmitted ? 'Update submission' : 'Submit preferences'
+                      !isSubmissionOpen
+                        ? 'Window closed'
+                        : !allContactedSet
+                        ? 'Select Yes/No for all items'
+                        : alreadySubmitted
+                        ? 'Update submission'
+                        : 'Submit preferences'
                     }
                   >
-                    {submitting ? 'Submitting…' : (alreadySubmitted ? 'Re-submit' : 'Submit Preferences')}
+                    {submitting ? 'Submitting…' : alreadySubmitted ? 'Re-submit' : 'Submit Preferences'}
                   </button>
                 </div>
               </div>

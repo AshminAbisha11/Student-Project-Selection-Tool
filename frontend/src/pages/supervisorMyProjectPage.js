@@ -1,5 +1,5 @@
 // src/pages/supervisorMyProjectPage.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate, useLocation, NavLink } from 'react-router-dom';
 import './supervisorMyProjectPage.css';
 import SupervisorNav from '../components/supervisorNav';
@@ -37,35 +37,49 @@ export default function MyProjectsPage() {
   }, [location.pathname]);
 
   const token = localStorage.getItem('token');
-  const user  = JSON.parse(localStorage.getItem('user') || 'null');
+  const user  = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
 
+  // auth + role guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
       return;
     }
-    if (String(user.role || '').toLowerCase() !== 'supervisor') {
+    if ((user.role || '').toLowerCase() !== 'supervisor') {
       navigate('/student-dashboard', { replace: true });
     }
   }, [navigate, token, user]);
 
   const authHeaders = useMemo(() => ({
     'Content-Type': 'application/json',
-    Authorization: token ? `Bearer ${token}` : '',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }), [token]);
 
-  const fetchMyProjects = async () => {
+  const fetchMyProjects = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const tab = showArchived ? 'archived' : 'active'; // controller includes drafts under 'active'
+      // Backend expects archived query: '0' | '1' | 'all'
+      const archivedQ = showArchived ? '1' : '0';
+      // cycle filter: omit to prefer OPEN else most recent (see controller)
       const res = await fetch(
-        `${API}${SUP_BASE}/projects?tab=${tab}&cycle=active`,
+        `${API}${SUP_BASE}/projects?archived=${archivedQ}`,
         { headers: authHeaders }
       );
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setProjects(Array.isArray(data) ? data : []);
+
+      // Handle session expiry
+      if (res.status === 401 || res.status === 403) {
+        localStorage.clear();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || 'Failed to load projects');
+
+      // Controller returns { meta, projects: [...] }
+      const list = Array.isArray(data) ? data : (data.projects || []);
+      setProjects(list);
     } catch (e) {
       console.error(e);
       setError(e.message || 'Failed to load projects');
@@ -73,12 +87,11 @@ export default function MyProjectsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authHeaders, navigate, showArchived]);
 
   useEffect(() => {
     fetchMyProjects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showArchived]);
+  }, [fetchMyProjects]);
 
   const onDelete = async (projectId) => {
     if (!window.confirm('Delete this project permanently? This cannot be undone.')) return;
@@ -87,7 +100,13 @@ export default function MyProjectsPage() {
         method: 'DELETE',
         headers: authHeaders,
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (res.status === 401 || res.status === 403) {
+        localStorage.clear();
+        navigate('/login', { replace: true });
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || 'Delete failed');
       await fetchMyProjects();
     } catch (e) {
       console.error(e);
@@ -101,7 +120,13 @@ export default function MyProjectsPage() {
         method: 'PATCH',
         headers: authHeaders,
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (res.status === 401 || res.status === 403) {
+        localStorage.clear();
+        navigate('/login', { replace: true });
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || 'Archive failed');
       await fetchMyProjects();
     } catch (e) {
       console.error(e);
@@ -115,7 +140,13 @@ export default function MyProjectsPage() {
         method: 'PATCH',
         headers: authHeaders,
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (res.status === 401 || res.status === 403) {
+        localStorage.clear();
+        navigate('/login', { replace: true });
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || 'Unarchive failed');
       await fetchMyProjects();
     } catch (e) {
       console.error(e);
@@ -206,7 +237,6 @@ export default function MyProjectsPage() {
                           {String(p.approval_status || '').toUpperCase() || 'STATUS'}
                         </span>
 
-                        {/* student proposal pool chip */}
                         {(Number(p.is_student_pool) === 1 ||
                           /student proposal/i.test(`${p.title || ''} ${p.topic || ''}`)
                         ) && (

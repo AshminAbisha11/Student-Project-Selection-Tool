@@ -223,3 +223,17 @@
 @media (prefers-reduced-motion: reduce){
   .adbd-btn, .adbd-chip{ transition:none !important; }
 }
+
+/* Modal */
+.adbd-modal-backdrop{
+  position: fixed; inset: 0; background: rgba(22,16,40,.55);
+  display: grid; place-items: center; z-index: 1000; backdrop-filter: blur(2px);
+}
+.adbd-modal{
+  width: min(520px, 92vw);
+  background: #fff; border-radius: 16px; box-shadow: 0 12px 40px rgba(31,22,48,.25);
+  padding: 20px;
+}
+.adbd-modal-title{ margin: 0 0 8px; font-size: 18px; color: #1f1630; }
+.adbd-modal-body{ margin: 0 0 16px; color: #4d4759; line-height: 1.5; }
+.adbd-modal-actions{ display: flex; justify-content: flex-end; gap: 8px; }

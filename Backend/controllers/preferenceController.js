@@ -6,21 +6,28 @@ const VALID_CONTACT = ['Yes', 'No'];
 /* ---------------- Cycle helpers ---------------- */
 async function getMostRecentCycleId() {
   const [r] = await db.query(
-    `SELECT cycle_id FROM allocation_cycles ORDER BY submission_open_at DESC LIMIT 1`
+    `SELECT cycle_id FROM allocation_cycles ORDER BY submission_open_at DESC, cycle_id DESC LIMIT 1`
   );
   return r.length ? r[0].cycle_id : null;
 }
 
 async function getActiveCycleId() {
   const [byStatus] = await db.query(
-    `SELECT cycle_id FROM allocation_cycles WHERE status='open' ORDER BY submission_open_at DESC LIMIT 1`
+    `SELECT cycle_id FROM allocation_cycles WHERE status='open' ORDER BY submission_open_at DESC, cycle_id DESC LIMIT 1`
   );
   if (byStatus.length) return byStatus[0].cycle_id;
 
   const [byDate] = await db.query(
-    `SELECT cycle_id FROM allocation_cycles WHERE NOW() BETWEEN submission_open_at AND submission_close_at ORDER BY submission_open_at DESC LIMIT 1`
+    `SELECT cycle_id FROM allocation_cycles WHERE NOW() BETWEEN submission_open_at AND submission_close_at ORDER BY submission_open_at DESC, cycle_id DESC LIMIT 1`
   );
   return byDate.length ? byDate[0].cycle_id : null;
+}
+
+async function getLatestCommittedCycleId() {
+  const [r] = await db.query(
+    `SELECT cycle_id FROM allocation_cycles WHERE status='committed' ORDER BY commit_at DESC, cycle_id DESC LIMIT 1`
+  );
+  return r.length ? r[0].cycle_id : null;
 }
 
 async function cycleExists(cycleId) {
@@ -31,12 +38,30 @@ async function cycleExists(cycleId) {
   return !!r.length;
 }
 
-/** Prefer cycle in req (query/body), else active, else most recent. */
-async function resolveCycleId(req) {
+async function getCycleRow(cycleId) {
+  const [rows] = await db.query(
+    `SELECT * FROM allocation_cycles WHERE cycle_id=? LIMIT 1`,
+    [cycleId]
+  );
+  return rows.length ? rows[0] : null;
+}
+
+function isSubmissionsOpen(cycleRow) {
+  if (!cycleRow) return false;
+  if (String(cycleRow.status).toLowerCase() !== 'open') return false;
+  const closeAt = cycleRow.submission_close_at ? new Date(cycleRow.submission_close_at) : null;
+  if (!closeAt) return true; // no close set => treat as open window
+  return new Date() < closeAt;
+}
+
+/**
+ * Prefer explicit cycle_id -> ACTIVE -> LATEST COMMITTED -> MOST RECENT.
+ * Use for READ endpoints (listing/viewing).
+ */
+async function resolveCycleIdForRead(req) {
   const raw =
     req.query?.cycle_id ?? req.query?.cycleId ??
-    req.body?.cycle_id  ?? req.body?.cycleId  ??
-    req.cycle?.cycle_id ?? null;
+    req.body?.cycle_id  ?? req.body?.cycleId  ?? null;
 
   if (raw != null && String(raw).trim() !== '') {
     const cid = Number(raw);
@@ -51,10 +76,49 @@ async function resolveCycleId(req) {
   const active = await getActiveCycleId();
   if (active) return active;
 
+  const committed = await getLatestCommittedCycleId();
+  if (committed) return committed;
+
   const recent = await getMostRecentCycleId();
   if (recent) return recent;
 
-  const err = new Error('No active cycle');
+  const err = new Error('No cycles available');
+  err.status = 403;
+  throw err;
+}
+
+/**
+ * Prefer explicit cycle_id (must be OPEN) -> ACTIVE (OPEN).
+ * Use for WRITE endpoints (add/reorder/delete/submit).
+ */
+async function resolveCycleIdForWrite(req) {
+  const raw =
+    req.query?.cycle_id ?? req.query?.cycleId ??
+    req.body?.cycle_id  ?? req.body?.cycleId  ?? null;
+
+  if (raw != null && String(raw).trim() !== '') {
+    const cid = Number(raw);
+    if (!Number.isInteger(cid) || cid <= 0 || !(await cycleExists(cid))) {
+      const err = new Error('Invalid cycle_id');
+      err.status = 400;
+      throw err;
+    }
+    const row = await getCycleRow(cid);
+    if (!isSubmissionsOpen(row)) {
+      const err = new Error('Submissions are closed for this cycle');
+      err.status = 409;
+      throw err;
+    }
+    return cid;
+  }
+
+  const active = await getActiveCycleId();
+  if (active) {
+    const row = await getCycleRow(active);
+    if (isSubmissionsOpen(row)) return active;
+  }
+
+  const err = new Error('No open cycle for submissions');
   err.status = 403;
   throw err;
 }
@@ -84,7 +148,7 @@ exports.getPreferencesByStudent = async (req, res) => {
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
-    const cycleId = await resolveCycleId(req);
+    const cycleId = await resolveCycleIdForRead(req);
 
     const [rows] = await db.query(
       `
@@ -107,6 +171,7 @@ exports.getPreferencesByStudent = async (req, res) => {
       [studentId, cycleId]
     );
 
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json(rows || []);
   } catch (err) {
     const code = err.status || 500;
@@ -124,7 +189,7 @@ exports.getSubmissionStatus = async (req, res) => {
     const studentId = req.user?.user_id;
     if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const cycleId = await resolveCycleId(req);
+    const cycleId = await resolveCycleIdForRead(req);
 
     const [rows] = await db.query(
       `SELECT MAX(submitted_at) AS submitted_at
@@ -134,6 +199,7 @@ exports.getSubmissionStatus = async (req, res) => {
     );
 
     const submitted_at = rows?.[0]?.submitted_at || null;
+    res.set('Cache-Control', 'no-store');
     res.json({ submitted: Boolean(submitted_at), submitted_at, cycle_id: cycleId });
   } catch (e) {
     const code = e.status || 500;
@@ -157,7 +223,7 @@ exports.addPreference = async (req, res) => {
   }
 
   try {
-    const cycleId = await resolveCycleId(req);
+    const cycleId = await resolveCycleIdForWrite(req);
 
     // validate project belongs to the same cycle and is usable
     const [[proj]] = await db.query(
@@ -197,6 +263,7 @@ exports.addPreference = async (req, res) => {
       [student_id, cycleId, projectId, preference_order, contacted_supervisor]
     );
 
+    res.set('Cache-Control', 'no-store');
     return res.status(201).json({
       message: 'Preference added successfully',
       preference_id: result.insertId,
@@ -247,6 +314,13 @@ exports.updatePreferenceOrder = async (req, res) => {
     }
     const cycleId = row.cycle_id;
 
+    // ensure submissions still open for that cycle
+    const cycleRow = await getCycleRow(cycleId);
+    if (!isSubmissionsOpen(cycleRow)) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'Submissions are closed for this cycle' });
+    }
+
     // pull all prefs in this cycle
     const [all] = await conn.query(
       `SELECT preference_id FROM preferences WHERE student_id=? AND cycle_id=? ORDER BY preference_order ASC`,
@@ -284,6 +358,7 @@ exports.updatePreferenceOrder = async (req, res) => {
     }
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Preference order updated successfully' });
   } catch (err) {
     try { await conn.rollback(); } catch {}
@@ -314,6 +389,18 @@ exports.updateContactedSupervisor = async (req, res) => {
   }
 
   try {
+    // ensure cycle still open
+    const [[row]] = await db.query(
+      `SELECT cycle_id FROM preferences WHERE preference_id=? AND student_id=?`,
+      [prefId, studentId]
+    );
+    if (!row) return res.status(404).json({ message: 'Preference not found' });
+
+    const cycleRow = await getCycleRow(row.cycle_id);
+    if (!isSubmissionsOpen(cycleRow)) {
+      return res.status(409).json({ message: 'Submissions are closed for this cycle' });
+    }
+
     const [result] = await db.query(
       `UPDATE preferences
           SET contacted_supervisor = ?
@@ -325,6 +412,7 @@ exports.updateContactedSupervisor = async (req, res) => {
       return res.status(404).json({ message: 'Preference not found' });
     }
 
+    res.set('Cache-Control', 'no-store');
     return res.json({ message: 'Contacted supervisor flag updated successfully' });
   } catch (err) {
     console.error('Error updating contacted_supervisor:', err);
@@ -356,6 +444,13 @@ exports.deletePreference = async (req, res) => {
     }
     const cycleId = row.cycle_id;
 
+    // ensure submissions still open
+    const cycleRow = await getCycleRow(cycleId);
+    if (!isSubmissionsOpen(cycleRow)) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'Submissions are closed for this cycle' });
+    }
+
     const [del] = await conn.query(
       `DELETE FROM preferences WHERE preference_id = ? AND student_id = ?`,
       [preferenceId, studentId]
@@ -367,6 +462,7 @@ exports.deletePreference = async (req, res) => {
 
     await repackOrders(studentId, cycleId, conn);
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({ message: 'Preference deleted and reordered successfully' });
   } catch (err) {
     try { await conn.rollback(); } catch {}
@@ -381,16 +477,14 @@ exports.deletePreference = async (req, res) => {
  * POST /preferences/submit -> lock + snapshot (idempotent)
  * Body: { cycle_id (or cycleId), preferences: [project_id, ...] }
  * ===================================================== */
-// controllers/preferenceController.js  — replace ONLY this handler
-
 exports.submitPreferences = async (req, res) => {
   const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-  // Accept cycle_id or cycleId; coerce/fallback to active if missing/invalid
+  // Resolve an OPEN cycle (explicit or active)
   let cycleId;
   try {
-    cycleId = await resolveCycleId(req);
+    cycleId = await resolveCycleIdForWrite(req);
   } catch (e) {
     return res.status(e.status || 400).json({ message: e.message || 'Invalid cycle_id' });
   }
@@ -410,6 +504,23 @@ exports.submitPreferences = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
+
+    // Ensure all projects belong to this cycle & are approved/non-archived
+    const [checkRows] = await conn.query(
+      `SELECT project_id, approval_status, is_archived
+         FROM projects
+        WHERE project_id IN (${clean.map(() => '?').join(',')})
+          AND cycle_id = ?`,
+      [...clean, cycleId]
+    );
+    if (checkRows.length !== clean.length) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'One or more projects do not belong to this cycle' });
+    }
+    if (checkRows.some(r => String(r.approval_status || '').toLowerCase() !== 'approved' || Number(r.is_archived) === 1)) {
+      await conn.rollback();
+      return res.status(409).json({ message: 'One or more projects are not available' });
+    }
 
     // 1) UPSERT the submission record (idempotent)
     await conn.query(
@@ -448,8 +559,6 @@ exports.submitPreferences = async (req, res) => {
       contactedByProject[projectId] || 'No'         // preserve earlier flag, default 'No'
     ]);
 
-    // NOTE: your preferences table columns (per screenshot):
-    // preference_id, student_id, cycle_id, project_id, preference_order, contacted_supervisor, is_locked, created_at
     await conn.query(
       `
       INSERT INTO preferences
@@ -461,6 +570,7 @@ exports.submitPreferences = async (req, res) => {
     );
 
     await conn.commit();
+    res.set('Cache-Control', 'no-store');
     res.json({ ok: true, cycle_id: cycleId, saved: rows.length });
   } catch (e) {
     try { await conn.rollback(); } catch {}
@@ -476,4 +586,3 @@ exports.submitPreferences = async (req, res) => {
     try { await conn.release(); } catch {}
   }
 };
-

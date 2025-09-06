@@ -13,8 +13,7 @@ const PREF_CAP = 5;
 const isIdeaPoolProject = (p) =>
   p?.is_student_pool === 1 ||
   p?.is_student_proposal === 1 ||
-  (typeof p?.topic === 'string' &&
-    p.topic.trim().toLowerCase() === 'student proposal ideas');
+  (typeof p?.topic === 'string' && p.topic.trim().toLowerCase() === 'student proposal ideas');
 
 // de-dupe by project_id
 const uniqueById = (arr) =>
@@ -33,19 +32,19 @@ export default function BrowseProjectsPage() {
   const [prefIdByProject, setPrefIdByProject] = useState(() => new Map());
   const [prefCount, setPrefCount] = useState(0);
 
-  // NEW: cycle guard UI
+  // cycle guard UI
   const [blockedMsg, setBlockedMsg] = useState('');
   const [cycleId, setCycleId] = useState(null);
 
   const navigate = useNavigate();
-  const didInit = useRef(false); // prevent double-run in React StrictMode
+  const didInit = useRef(false);
 
-  // ------------- helpers ----------------
+  // -------- helpers
   const buildFilterQS = (f) => {
     const qs = new URLSearchParams();
     if (f.supervisor?.trim()) qs.set('supervisor', f.supervisor.trim());
     if (f.topic?.trim()) qs.set('topic', f.topic.trim());
-    if (f.keyword?.trim()) qs.set('keyword', f.keyword.trim()); // free-text/search
+    if (f.keyword?.trim()) qs.set('keyword', f.keyword.trim());
     const s = qs.toString();
     return s ? `?${s}` : '';
   };
@@ -53,90 +52,103 @@ export default function BrowseProjectsPage() {
   const hasAnyFilter = (f) =>
     Boolean(f.supervisor?.trim() || f.topic?.trim() || f.keyword?.trim());
 
-  // ------------- preferences -------------
-  const primeAddedPrefs = useCallback(async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      const res = await fetch(`${API}/preferences`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : data.preferences || [];
-      const idsSet = new Set(list.map((p) => p.project_id));
-      const idMap = new Map(list.map((p) => [p.project_id, p.preference_id]));
-      setAddedPrefs(idsSet);
-      setPrefIdByProject(idMap);
-      setPrefCount(idsSet.size);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  // -------- preferences (cycle-aware)
+  const primeAddedPrefs = useCallback(
+    async (useCycleId) => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        // Only fetch if we know which cycle the browsing is for
+        const qs = useCycleId ? `?cycle_id=${useCycleId}` : '';
+        const res = await fetch(`${API}/preferences${qs}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : data.preferences || [];
+        const idsSet = new Set(list.map((p) => p.project_id));
+        const idMap = new Map(list.map((p) => [p.project_id, p.preference_id]));
+        setAddedPrefs(idsSet);
+        setPrefIdByProject(idMap);
+        setPrefCount(idsSet.size);
+      } catch {
+        /* ignore */
+      }
+    },
+    []
+  );
 
-  // ------------- fetchers ----------------
-  // Core fetch that always goes via /projects/public (gated by open cycle)
+  // -------- fetchers (always via /projects/public)
   const fetchPublicProjects = useCallback(
-  async (qs = '') => {
-    setLoading(true);
-    setBlockedMsg('');
-    try {
-      const headers = { 'Content-Type': 'application/json' };
-      const token = localStorage.getItem('token');
-      if (token && token !== 'null' && token !== 'undefined') {
-        headers.Authorization = `Bearer ${token}`; // optional auth
-      }
-
-      const res = await fetch(`${API}/projects/public${qs}`, { headers });
-
-      // No open cycle
-      if (res.status === 409) {
-        const data = await res.json().catch(() => ({}));
-        setProjects([]);
-        setCycleId(null);
-        setBlockedMsg(data?.message || 'Project browsing isn’t open yet.');
-        setEmptyMsg('');
-        setSuggestions([]);
-        return;
-      }
-
-      // If the endpoint was accidentally protected server-side
-      if (res.status === 401 || res.status === 403) {
-        setProjects([]);
-        setCycleId(null);
-        setBlockedMsg('Please sign in to view projects.');
-        setEmptyMsg('');
-        setSuggestions([]);
-        return;
-      }
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to load projects');
-
-      const list = Array.isArray(data) ? data : data.projects || [];
-      setProjects(uniqueById(list));
-      setCycleId(data?.cycle_id ?? null);
-      setEmptyMsg(
-        list.length ? '' : (hasAnyFilter(filters) ? 'No projects match your filters.' : '')
-      );
-      setSuggestions([]);
-    } catch (err) {
-      console.error('Error fetching public projects:', err);
-      setProjects([]);
-      setCycleId(null);
+    async (qs = '') => {
+      setLoading(true);
       setBlockedMsg('');
-      setEmptyMsg(err.message || 'Failed to load projects.');
-    } finally {
-      setLoading(false);
-    }
-  },
-  [filters]
-);
+      const ctrl = new AbortController();
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = localStorage.getItem('token');
+        if (token && token !== 'null' && token !== 'undefined') {
+          headers.Authorization = `Bearer ${token}`; // optional auth
+        }
 
+        const res = await fetch(`${API}/projects/public${qs}`, {
+          headers,
+          signal: ctrl.signal,
+          cache: 'no-store',
+        });
 
-  const fetchAllProjects = useCallback(async () => {
-    await fetchPublicProjects('');
-  }, [fetchPublicProjects]);
+        // No open cycle
+        if (res.status === 409) {
+          const data = await res.json().catch(() => ({}));
+          setProjects([]);
+          setCycleId(null);
+          setBlockedMsg(data?.message || 'Project browsing isn’t open yet.');
+          setEmptyMsg('');
+          setSuggestions([]);
+          // Clear local prefs view since there is no open cycle
+          setAddedPrefs(new Set());
+          setPrefIdByProject(new Map());
+          setPrefCount(0);
+          return;
+        }
+
+        // If endpoint is protected server-side
+        if (res.status === 401 || res.status === 403) {
+          setProjects([]);
+          setCycleId(null);
+          setBlockedMsg('Please sign in to view projects.');
+          setEmptyMsg('');
+          setSuggestions([]);
+          return;
+        }
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed to load projects');
+
+        const list = Array.isArray(data) ? data : data.projects || [];
+        const cid = data?.cycle_id ?? null;
+
+        setProjects(uniqueById(list));
+        setCycleId(cid);
+        setEmptyMsg(list.length ? '' : hasAnyFilter(filters) ? 'No projects match your filters.' : '');
+        setSuggestions([]);
+
+        // Sync preferences for this exact cycle (prevents showing prefs from a different cycle)
+        if (cid) primeAddedPrefs(cid);
+      } catch (err) {
+        console.error('Error fetching public projects:', err);
+        setProjects([]);
+        setCycleId(null);
+        setBlockedMsg('');
+        setEmptyMsg(err.message || 'Failed to load projects.');
+      } finally {
+        setLoading(false);
+      }
+      return () => ctrl.abort();
+    },
+    [filters, primeAddedPrefs]
+  );
 
   const fetchProjects = useCallback(async () => {
     const qs = hasAnyFilter(filters) ? buildFilterQS(filters) : '';
@@ -146,7 +158,6 @@ export default function BrowseProjectsPage() {
   const handleGlobalSearch = useCallback(
     async (rawTerm) => {
       const term = (rawTerm || '').trim();
-      // Put search into the same "keyword" funnel and fetch via /public
       const next = { ...filters, keyword: term };
       setFilters(next);
       const qs = buildFilterQS(next);
@@ -155,10 +166,10 @@ export default function BrowseProjectsPage() {
     [filters, fetchPublicProjects]
   );
 
-  // ------------- actions -----------------
+  // -------- actions
   const handleViewDetails = async (projectId) => {
     try {
-      const res = await fetch(`${API}/projects/details/${projectId}`);
+      const res = await fetch(`${API}/projects/details/${projectId}`, { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to load project details');
       setSelectedProject(data);
@@ -180,6 +191,7 @@ export default function BrowseProjectsPage() {
       return;
     }
 
+    // optimistic
     setAddedPrefs((prev) => new Set(prev).add(projectId));
     setPrefCount((c) => c + 1);
 
@@ -190,7 +202,8 @@ export default function BrowseProjectsPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ project_id: projectId }),
+        // Send cycle_id explicitly so backend uses the same cycle as browsing
+        body: JSON.stringify({ project_id: projectId, cycle_id: cycleId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Failed to add preference');
@@ -201,6 +214,7 @@ export default function BrowseProjectsPage() {
         return next;
       });
     } catch (err) {
+      // revert optimistic
       setAddedPrefs((prev) => {
         const n = new Set(prev);
         n.delete(projectId);
@@ -221,6 +235,7 @@ export default function BrowseProjectsPage() {
     const prefId = prefIdByProject.get(projectId);
     if (!prefId) return;
 
+    // optimistic
     setAddedPrefs((prev) => {
       const n = new Set(prev);
       n.delete(projectId);
@@ -243,26 +258,28 @@ export default function BrowseProjectsPage() {
         throw new Error(err.message || 'Failed to remove preference');
       }
     } catch (err) {
-      await primeAddedPrefs();
+      // re-sync from server for this cycle
+      await primeAddedPrefs(cycleId);
       console.error('Remove preference error:', err);
       alert(err.message);
     }
   };
 
   const handleSubmitIdea = (project) => {
-    // supervisor_id comes from users.user_id in the backend now
+    // supervisor_id comes from users.user_id in the backend
     navigate(`/submit-proposal?sup=${project.supervisor_id}`);
   };
 
-  // ------------- lifecycle ----------------
+  // -------- lifecycle
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    fetchAllProjects();
-    primeAddedPrefs();
-  }, [fetchAllProjects, primeAddedPrefs]);
+    // Initial fetch (no filters)
+    fetchPublicProjects('');
+  }, [fetchPublicProjects]);
 
-  const handleChange = (e) => setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleChange = (e) =>
+    setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleReset = async () => {
     const next = { supervisor: '', topic: '', keyword: '' };
@@ -280,10 +297,10 @@ export default function BrowseProjectsPage() {
     await fetchPublicProjects('');
   }, [fetchPublicProjects]);
 
-  // Final guard: even if backend somehow returns dup ids, render unique set
+  // Even if backend returns dup ids, render unique set
   const renderList = useMemo(() => uniqueById(projects), [projects]);
 
-  // ------------- render -------------------
+  // -------- render
   return (
     <>
       <HeaderBar onSearch={handleGlobalSearch} onClear={showAll} />

@@ -1,22 +1,30 @@
 // src/pages/AdminCyclesPage.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminLayout from "../components/adminLayout";
 import "./adminCyclesPage.css";
 
 const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+/** Auth fetch with simple JSON + error handling */
 function useAuthFetch() {
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
   return async (path, opts = {}) => {
+    const token = localStorage.getItem("token") || "";
     const res = await fetch(`${API}${path}`, {
       ...opts,
       headers: {
         "Content-Type": "application/json",
         ...(opts.headers || {}),
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+      cache: "no-store",
     });
+
+    if (res.status === 401 || res.status === 403) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+    }
+
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.message || "Request failed");
     return data;
@@ -136,12 +144,6 @@ export default function AdminCyclesPage() {
           }),
         });
         setOk(openImmediately ? "Cycle created & opened." : "Cycle created.");
-        // If we asked to open immediately, backend already closed other opens & seeded projects.
-        // Still, refresh to reflect the new active cycle.
-        if (openImmediately) {
-          // nothing else needed
-        }
-        // Select the new row in UI
         setEditingId(created?.cycle_id || null);
       }
       await refresh();
@@ -153,14 +155,18 @@ export default function AdminCyclesPage() {
   }
 
   async function openNow(id) {
-    if (!window.confirm("Open this cycle now? This closes any other open cycle and seeds approved projects from the previous cycle.")) {
+    if (
+      !window.confirm(
+        "Open this cycle now? This closes any other open cycle and seeds approved projects from the previous cycle and drafts."
+      )
+    ) {
       return;
     }
     setLoading(true);
     setErr("");
     setOk("");
     try {
-      await authFetch(`/cycle/${id}/open`, { method: "POST" });
+      await authFetch(`/cycle/${id}/open?now=1`, { method: "POST" });
       setOk("Cycle opened.");
       await refresh();
     } catch (e) {
@@ -176,7 +182,7 @@ export default function AdminCyclesPage() {
     setErr("");
     setOk("");
     try {
-      await authFetch(`/cycle/${id}/close`, { method: "POST" });
+      await authFetch(`/cycle/${id}/close?now=1`, { method: "POST" });
       setOk("Cycle closed.");
       await refresh();
     } catch (e) {
@@ -186,14 +192,56 @@ export default function AdminCyclesPage() {
     }
   }
 
+  // Mark the cycle as COMMITTED (no allocations are written here).
   async function commitNow(id) {
-    if (!window.confirm("Mark this cycle as committed now? This finalizes results.")) return;
+    if (
+      !window.confirm(
+        "Commit this cycle now? This marks the cycle as committed (and back-fills close time if missing)."
+      )
+    )
+      return;
     setLoading(true);
     setErr("");
     setOk("");
     try {
       await authFetch(`/cycle/${id}/commit-now`, { method: "POST" });
-      setOk("Cycle committed.");
+      setOk("Cycle marked as committed.");
+      await refresh();
+
+      // Optional: immediately run the allocation commit
+      if (
+        window.confirm(
+          "Do you want to run the Allocation commit now (write allocations to DB for this cycle)?"
+        )
+      ) {
+        await commitAllocations(id, { skipConfirm: true });
+      }
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Actually write allocations for this cycle.
+  async function commitAllocations(id, { skipConfirm = false } = {}) {
+    if (
+      !skipConfirm &&
+      !window.confirm(
+        "Run the Allocation commit for this cycle now? This writes allocations to the database."
+      )
+    ) {
+      return;
+    }
+    setLoading(true);
+    setErr("");
+    setOk("");
+    try {
+      const res = await authFetch(`/allocations/commit`, {
+        method: "POST",
+        body: JSON.stringify({ cycle_id: id }),
+      });
+      setOk(`Allocations committed. Inserted: ${res?.inserted ?? 0}`);
       await refresh();
     } catch (e) {
       setErr(e.message);
@@ -220,7 +268,7 @@ export default function AdminCyclesPage() {
 
   async function remove(id) {
     const msg =
-      "Delete this cycle? This will fail if it has data. Use OK only if you are sure.";
+      "Delete this cycle? This will fail if it has related data. Use OK only if you are sure.";
     if (!window.confirm(msg)) return;
     setLoading(true);
     setErr("");
@@ -230,6 +278,23 @@ export default function AdminCyclesPage() {
       setOk("Cycle deleted.");
       await refresh();
     } catch (e) {
+      if ((e.message || "").toLowerCase().includes("pass ?force=1")) {
+        const yes = window.confirm(
+          "This cycle has related data. Force delete will remove allocations & projects. Continue?"
+        );
+        if (yes) {
+          try {
+            await authFetch(`/cycle/${id}?force=1`, { method: "DELETE" });
+            setOk("Cycle and related data deleted.");
+            await refresh();
+          } catch (e2) {
+            setErr(e2.message);
+          } finally {
+            setLoading(false);
+          }
+          return;
+        }
+      }
       setErr(e.message);
     } finally {
       setLoading(false);
@@ -340,11 +405,7 @@ export default function AdminCyclesPage() {
               >
                 {editingId ? "Save changes" : "Create cycle"}
               </button>
-              <button
-                className="as-btn as-btn--ghost"
-                type="button"
-                onClick={onCreateNew}
-              >
+              <button className="as-btn as-btn--ghost" type="button" onClick={onCreateNew}>
                 Reset form
               </button>
             </div>
@@ -401,10 +462,7 @@ export default function AdminCyclesPage() {
                         >
                           Open now
                         </button>
-                        <button
-                          className="as-btn as-btn--ghost"
-                          onClick={() => remove(c.cycle_id)}
-                        >
+                        <button className="as-btn as-btn--ghost" onClick={() => remove(c.cycle_id)}>
                           Delete
                         </button>
                       </>
@@ -412,17 +470,14 @@ export default function AdminCyclesPage() {
 
                     {c.status === "open" && (
                       <>
-                        <button
-                          className="as-btn as-btn--ghost"
-                          onClick={() => closeNow(c.cycle_id)}
-                        >
+                        <button className="as-btn as-btn--ghost" onClick={() => closeNow(c.cycle_id)}>
                           Close now
                         </button>
                         <button
-                          className="as-btn as-btn--ghost"
+                          className="as-btn as-btn--primary"
                           onClick={() => commitNow(c.cycle_id)}
                         >
-                          Commit now
+                          Commit cycle now
                         </button>
                       </>
                     )}
@@ -435,16 +490,13 @@ export default function AdminCyclesPage() {
                         >
                           Re-open
                         </button>
-                        <button
-                          className="as-btn as-btn--ghost"
-                          onClick={() => archive(c.cycle_id)}
-                        >
+                        <button className="as-btn as-btn--ghost" onClick={() => commitNow(c.cycle_id)}>
+                          Commit cycle now
+                        </button>
+                        <button className="as-btn as-btn--ghost" onClick={() => archive(c.cycle_id)}>
                           Archive
                         </button>
-                        <button
-                          className="as-btn as-btn--ghost"
-                          onClick={() => remove(c.cycle_id)}
-                        >
+                        <button className="as-btn as-btn--ghost" onClick={() => remove(c.cycle_id)}>
                           Delete
                         </button>
                         <button
@@ -459,9 +511,12 @@ export default function AdminCyclesPage() {
                     {c.status === "committed" && (
                       <>
                         <button
-                          className="as-btn as-btn--ghost"
-                          onClick={() => openNow(c.cycle_id)}
+                          className="as-btn as-btn--primary"
+                          onClick={() => commitAllocations(c.cycle_id)}
                         >
+                          Run allocation commit
+                        </button>
+                        <button className="as-btn as-btn--ghost" onClick={() => openNow(c.cycle_id)}>
                           Start new run from this
                         </button>
                       </>

@@ -1,5 +1,5 @@
 // src/pages/SupervisorDashboardPage.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ProfileDropdown from '../components/profileDropdown';
@@ -23,6 +23,28 @@ function getNameFromToken() {
   }
 }
 
+/** Small helper: GET with auth + 401/403 handling */
+async function apiGet(path, navigate, signal) {
+  const token = localStorage.getItem('token');
+  try {
+    const { data } = await axios.get(`${API}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    });
+    return data;
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 401 || status === 403) {
+      localStorage.clear();
+      try { navigate('/login', { replace: true }); } catch {}
+      throw new Error(
+        err?.response?.data?.message || 'Your session has expired. Please log in again.'
+      );
+    }
+    throw err;
+  }
+}
+
 export default function SupervisorDashboardPage() {
   const navigate = useNavigate();
 
@@ -30,7 +52,7 @@ export default function SupervisorDashboardPage() {
   const [overview, setOverview] = useState({
     projects: 0,
     pendingProposals: 0,
-    studentsAllocated: 0, // <-- match controller key
+    allocatedStudents: 0, // <-- match controller key
   });
 
   // Memoize token & user so they don't change identity each render
@@ -59,38 +81,29 @@ export default function SupervisorDashboardPage() {
   }, [navigate, token, user, userRole]);
 
   // load dashboard overview
-  const loadOverview = async (abortSignal) => {
+  const loadOverview = useCallback(async (signal) => {
     setLoading(true);
     try {
-      const { data } = await axios.get(`${API}${SUP_BASE}/overview`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: abortSignal,
-      });
+      const data = await apiGet(`${SUP_BASE}/overview`, navigate, signal);
       setOverview({
         projects: Number(data.projects || 0),
         pendingProposals: Number(data.pendingProposals || 0),
-        studentsAllocated: Number(data.studentsAllocated || 0), // <-- fixed
+        allocatedStudents: Number(data.allocatedStudents || 0), // <-- fixed to match controller
       });
     } catch (err) {
-      if (!abortSignal?.aborted) {
-        console.warn('Overview load failed:', err?.response?.data || err.message);
-        if (err.response?.status === 401 || err.response?.status === 403) {
-          localStorage.clear();
-          navigate('/login', { replace: true });
-        }
-      }
+      // errors are handled in apiGet (401/403). For others, just log.
+      console.warn('Overview load failed:', err?.message || err);
     } finally {
-      if (!abortSignal?.aborted) setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  };
+  }, [navigate]);
 
   useEffect(() => {
     if (!token || !userId) return;
     const controller = new AbortController();
     loadOverview(controller.signal);
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, userId]);
+  }, [token, userId, loadOverview]);
 
   return (
     <div
@@ -112,38 +125,35 @@ export default function SupervisorDashboardPage() {
 
         {/* KPI cards */}
         <div className="dashboard-cards">
-          <div
+          <button
             className="dashboard-card"
             onClick={() => navigate('/supervisor/my-projects')}
-            style={{ cursor: 'pointer' }}
             aria-label="View my projects"
             title="View My Projects"
           >
             <h4>{loading ? '—' : overview.projects}</h4>
             <p>Projects Created</p>
-          </div>
+          </button>
 
-          <div
+          <button
             className="dashboard-card"
             onClick={() => navigate('/supervisor/received-proposals')}
-            style={{ cursor: 'pointer' }}
             aria-label="Review proposals"
             title="Review Proposals"
           >
             <h4>{loading ? '—' : overview.pendingProposals}</h4>
             <p>Proposals Pending Review</p>
-          </div>
+          </button>
 
-          <div
+          <button
             className="dashboard-card"
             onClick={() => navigate('/supervisor/allocated-students')}
-            style={{ cursor: 'pointer' }}
             aria-label="View allocated students"
             title="View Allocated Students"
           >
-            <h4>{loading ? '—' : overview.studentsAllocated}</h4>
+            <h4>{loading ? '—' : overview.allocatedStudents}</h4>
             <p>Students Allocated</p>
-          </div>
+          </button>
         </div>
 
         {/* Quick Actions */}
@@ -210,7 +220,7 @@ export default function SupervisorDashboardPage() {
 
             <button
               className="settings-card"
-              onClick={() => navigate('/help')}
+              onClick={() => navigate('/help-support')}
               title="Open help and FAQ"
             >
               <div className="settings-content">
