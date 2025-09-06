@@ -705,7 +705,7 @@ exports.createProject = async (req, res) => {
       res.set('Cache-Control', 'no-store');
       return res.status(201).json({
         message: drafted
-          ? 'Project created as a draft (no active cycle). It will appear to students once a cycle is opened.'
+          ? 'Project created as a draft. It will appear to students once a allocation cycle is opened.'
           : 'Project created and attached to the active cycle.',
         project,
       });

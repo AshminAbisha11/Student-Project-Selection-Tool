@@ -1,19 +1,28 @@
 import React, { useMemo, useState } from 'react';
 import './supervisorProposalModal.css';
 
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const SUP_BASE = '/supervisor';
+
 export default function SupervisorProposalModal({ open, proposal, onClose, onUpdated }) {
   const [submitting, setSubmitting] = useState(false);
   const [reason, setReason] = useState('');
 
   const token = localStorage.getItem('token');
-  const API = 'http://localhost:5000';
 
   const title = useMemo(
-    () => proposal?.display_title || proposal?.proposal_title || proposal?.project_title || 'Untitled',
+    () =>
+      proposal?.display_title ||
+      proposal?.proposal_title ||
+      proposal?.project_title ||
+      'Untitled',
     [proposal]
   );
 
   if (!open || !proposal) return null;
+
+  const isLocked = ['allocated', 'accepted', 'rejected']
+    .includes(String(proposal.status || '').toLowerCase());
 
   const mailtoHref = (() => {
     const subject = `Regarding your proposal: ${title}`;
@@ -30,6 +39,8 @@ Thanks,
 
   async function submitDecision(status) {
     if (submitting) return;
+
+    // simple validation only for rejection
     if (status === 'rejected' && reason.trim().length < 5) {
       alert('Please provide a brief reason (min 5 characters) for rejection.');
       return;
@@ -38,38 +49,25 @@ Thanks,
     try {
       setSubmitting(true);
 
-      // If this is a STUDENT-IDEA proposal (no project_id), use the new endpoint
-      if (status === 'accepted' && (proposal.project_id == null)) {
-        const res = await fetch(`${API}/allocations/accept-student-idea`, {
-          method: 'POST',
+      const res = await fetch(
+        `${API}${SUP_BASE}/proposals/${proposal.proposal_id}/decision`,
+        {
+          method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ proposal_id: proposal.proposal_id }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.message || 'Accept failed');
+          body: JSON.stringify({
+            status,                           // 'accepted' | 'rejected' | 'under_review'
+            ...(status === 'rejected' ? { reason: reason.trim() } : {}),
+          }),
+        }
+      );
 
-        // reflect in UI
-        onUpdated?.(proposal.proposal_id, { ...proposal, status: 'allocated' });
-        onClose?.();
-        return;
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || 'Failed to update');
 
-      // Otherwise: existing decision route for project-linked proposals
-      const res = await fetch(`${API}/supervisor-list/proposals/${proposal.proposal_id}/decision`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status, reason }),
-      });
-      const updated = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(updated.message || 'Failed to update');
-
-      onUpdated?.(proposal.proposal_id, updated);
+      onUpdated?.(proposal.proposal_id, data);
       onClose?.();
     } catch (e) {
       alert(e.message || 'Failed to update');
@@ -77,8 +75,6 @@ Thanks,
       setSubmitting(false);
     }
   }
-
-  const isAllocated = proposal.status === 'allocated';
 
   return (
     <div className="spm-backdrop" onClick={onClose}>
@@ -91,7 +87,10 @@ Thanks,
         <div className="spm-meta">
           <div><strong>Student:</strong> {proposal.student_name}</div>
           <div><strong>Email:</strong> {proposal.student_email}</div>
-          <div><strong>Submitted:</strong> {proposal.created_at ? new Date(proposal.created_at).toLocaleString() : '—'}</div>
+          <div>
+            <strong>Submitted:</strong>{' '}
+            {proposal.created_at ? new Date(proposal.created_at).toLocaleString() : '—'}
+          </div>
           {proposal.project_id && <div><strong>Project ID:</strong> {proposal.project_id}</div>}
           <div><strong>Status:</strong> {proposal.status}</div>
         </div>
@@ -107,7 +106,8 @@ Thanks,
           <a
             className="spm-btn spm-btn--ghost"
             href={`${API}/uploads/${encodeURIComponent(proposal.file_path)}`}
-            target="_blank" rel="noreferrer"
+            target="_blank"
+            rel="noreferrer"
           >
             View Attachment
           </a>
@@ -120,14 +120,16 @@ Thanks,
           <div className="spm-spacer" />
           <button
             className="spm-btn spm-btn--ok"
-            disabled={submitting || isAllocated}
+            disabled={submitting || isLocked}
             onClick={() => submitDecision('accepted')}
           >
-            {isAllocated ? 'Allocated' : 'Accept'}
+            {isLocked && String(proposal.status).toLowerCase() !== 'rejected'
+              ? 'Accepted'
+              : 'Accept'}
           </button>
           <button
             className="spm-btn spm-btn--warn"
-            disabled={submitting || isAllocated}
+            disabled={submitting || isLocked}
             onClick={() => submitDecision('rejected')}
           >
             Reject
@@ -142,6 +144,7 @@ Thanks,
             placeholder="Briefly explain the reason..."
             value={reason}
             onChange={(e) => setReason(e.target.value)}
+            disabled={submitting || isLocked}
           />
         </div>
       </div>
