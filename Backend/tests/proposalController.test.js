@@ -1,5 +1,16 @@
 const path = require('path');
-const fs = require('fs');
+
+// --- Mock FS to avoid real file ops in submit flow ---
+jest.mock('fs', () => ({
+  existsSync: jest.fn(() => true),
+  mkdirSync: jest.fn(() => undefined),
+  renameSync: jest.fn(() => undefined),
+  unlinkSync: jest.fn(() => undefined),
+  promises: {
+    rename: jest.fn(async () => undefined),
+    unlink: jest.fn(async () => undefined),
+  },
+}));
 
 const { mockRes } = require('./mocks/res.mock');
 const mockReq = require('./helpers/mockReq');
@@ -27,9 +38,22 @@ beforeEach(() => {
     proposalCtl = require('../controllers/proposalController');
     db = require('./mocks/db.mock').db;
 
+    // Ensure base mocks exist/reset
     db.query.mockReset();
-    db.execute?.mockReset?.();
-    if (db.getConnection?.mockReset) db.getConnection.mockReset();
+    if (!db.execute) db.execute = jest.fn();
+    db.execute.mockReset();
+
+    // Connection that proxies to pool
+    if (!db.getConnection) db.getConnection = jest.fn();
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+      query: jest.fn((...args) => db.query(...args)),
+      execute: jest.fn((...args) => db.execute(...args)),
+    };
+    db.getConnection.mockResolvedValue(conn);
   });
 });
 
@@ -56,10 +80,8 @@ describe('proposalController.listAcceptingSupervisors', () => {
     const req = mockReq({ query: {} });
     const res = mockRes();
 
-    // resolveCycleId -> active byStatus returns cycle 7
     db.query
-      .mockResolvedValueOnce([[{ cycle_id: 7 }]]) // getActiveCycleId byStatus
-      // list query
+      .mockResolvedValueOnce([[{ cycle_id: 7 }]]) // active byStatus
       .mockResolvedValueOnce([[
         { supervisor_id: 12, name: 'Dr A', email: 'a@x', quota: 3, seats_left: 2 },
         { supervisor_id: 15, name: 'Dr B', email: 'b@x', quota: 1, seats_left: 1 },
@@ -87,11 +109,10 @@ describe('proposalController.submitProposal', () => {
   });
 
   it('400 when required fields missing; cleans uploaded file', async () => {
-    // We only assert the HTTP response here (fs spies can be flaky across environments)
     const req = mockReq({
       user: { user_id: 5 },
       body: { title: '', description: '', supervisor_id: '' },
-      file: { path: 'uploads/tmp.pdf', filename: 'tmp.pdf' },
+      file: { path: 'uploads/tmp.pdf', filename: 'tmp.pdf', mimetype: 'application/pdf', size: 10 },
     });
     const res = mockRes();
 
@@ -112,8 +133,7 @@ describe('proposalController.submitProposal', () => {
     });
     const res = mockRes();
 
-    // resolveCycleId -> active byStatus
-    db.query.mockResolvedValueOnce([[{ cycle_id: 3 }]]);
+    db.query.mockResolvedValueOnce([[{ cycle_id: 3 }]]); // resolveCycleId
 
     await proposalCtl.submitProposal(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
@@ -127,7 +147,7 @@ describe('proposalController.submitProposal', () => {
     const res = mockRes();
 
     db.query
-      .mockResolvedValueOnce([[{ cycle_id: 4 }]]) // resolveCycleId -> active
+      .mockResolvedValueOnce([[{ cycle_id: 4 }]]) // resolveCycleId
       .mockResolvedValueOnce([[]]);               // users (supervisor) not found
 
     await proposalCtl.submitProposal(req, res);
@@ -176,17 +196,38 @@ describe('proposalController.submitProposal', () => {
     const req = mockReq({
       user: { user_id: 5 },
       body: { title: 'Title', description: 'Desc', supervisor_id: '9' },
-      // Some mockReq implementations don’t propagate arbitrary props like `file`.
-      // We won’t assert on file_path value; only that the core payload is correct.
-      file: { path: 'uploads/abc.pdf', filename: 'abc.pdf' },
+      // controller may move this file; fs is mocked above
+      file: { path: 'uploads/abc.pdf', filename: 'abc.pdf', mimetype: 'application/pdf', size: 1234 },
     });
     const res = mockRes();
 
-    db.query
-      .mockResolvedValueOnce([[{ cycle_id: 4 }]])                       // resolveCycleId
-      .mockResolvedValueOnce([[{ user_id: 9, name: 'S', email: 's@x' }]]) // supervisor ok
-      .mockResolvedValueOnce([[{ project_id: 22, quota: 3, seats_left: 2 }]]) // pool ok
-      .mockResolvedValueOnce([{ insertId: 101 }]);                        // insert proposal
+    // 1) resolve cycle
+    db.query.mockResolvedValueOnce([[{ cycle_id: 4 }]]);
+    // 2) supervisor exists
+    db.query.mockResolvedValueOnce([[{ user_id: 9, name: 'S', email: 's@x' }]]);
+    // 3) student-idea pool exists with seats
+    db.query.mockResolvedValueOnce([[{ project_id: 22, quota: 3, seats_left: 2 }]]);
+
+    // After the above, the controller may do multiple writes (insert proposal, audit, etc.)
+    // Provide permissive fallbacks so extra INSERT/UPDATE/DELETE calls don't crash:
+    db.query.mockImplementation(async (sql) => {
+      if (typeof sql === 'string' && /insert\s+into\s+proposals/i.test(sql)) {
+        return [{ insertId: 101 }];
+      }
+      if (typeof sql === 'string' && /(insert|update|delete)\s+/i.test(sql)) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+    db.execute.mockImplementation(async (sql) => {
+      if (typeof sql === 'string' && /insert\s+into\s+proposals/i.test(sql)) {
+        return [{ insertId: 101 }];
+      }
+      if (typeof sql === 'string' && /(insert|update|delete)\s+/i.test(sql)) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
 
     await proposalCtl.submitProposal(req, res);
 
@@ -213,6 +254,21 @@ describe('proposalController.getProposalsByStudent', () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
+  // Treat non-numeric cycle_id as "unspecified" and resolve via active/recent
+  it('ignores non-numeric cycle_id and resolves via active/recent (returns [])', async () => {
+    const req = mockReq({ user: { user_id: 12 }, query: { cycle_id: 'abc' } });
+    const res = mockRes();
+
+    db.query
+      .mockResolvedValueOnce([[]]) // active by status
+      .mockResolvedValueOnce([[]]) // active by date
+      .mockResolvedValueOnce([[]]); // most recent
+
+    await proposalCtl.getProposalsByStudent(req, res);
+
+    expect(res.json).toHaveBeenCalledWith([]);
+  });
+
   it('returns proposals with topics join if table exists', async () => {
     const req = mockReq({ user: { user_id: 12 }, query: {} });
     const res = mockRes();
@@ -235,7 +291,6 @@ describe('proposalController.getProposalsByStudent', () => {
     const req = mockReq({ user: { user_id: 12 }, query: { cycle_id: '9' } });
     const res = mockRes();
 
-    // first attempt throws ER_NO_SUCH_TABLE
     const err = new Error('no such table'); err.code = 'ER_NO_SUCH_TABLE';
     db.query
       .mockRejectedValueOnce(err)

@@ -5,6 +5,7 @@ const mockReq = require('./helpers/mockReq');
 let feedbackCtl;
 let db;
 let sendMailMock;
+let createTransportMock;
 
 function resolveDbFromControllers() {
   const controllersDir = path.join(__dirname, '..', 'controllers');
@@ -13,6 +14,10 @@ function resolveDbFromControllers() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+
+  // Predictable env (used in email config)
+  process.env.EMAIL_USER = 'test@example.com';
+  process.env.EMAIL_APP_PASSWORD = 'app-pass';
 
   jest.isolateModules(() => {
     const dbModuleId = resolveDbFromControllers();
@@ -25,12 +30,16 @@ beforeEach(() => {
 
     // Nodemailer mock
     sendMailMock = jest.fn().mockResolvedValue({});
+    createTransportMock = jest.fn(() => ({ sendMail: sendMailMock }));
     jest.doMock('nodemailer', () => ({
-      createTransport: jest.fn(() => ({ sendMail: sendMailMock }))
+      createTransport: createTransportMock,
     }));
 
     feedbackCtl = require('../controllers/feedbackController');
     db = require('./mocks/db.mock').db;
+
+    // safety reset
+    db.query.mockReset?.();
   });
 });
 
@@ -45,6 +54,20 @@ describe('feedbackController.submitFeedback', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Feedback message is required.' })
     );
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  it('400 if message is only whitespace', async () => {
+    const req = mockReq({ body: { message: '   \n\t  ' } });
+    const res = mockRes();
+
+    await feedbackCtl.submitFeedback(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Feedback message is required.' })
+    );
+    expect(db.query).not.toHaveBeenCalled();
   });
 
   it('saves to DB and sends email on success', async () => {
@@ -55,25 +78,38 @@ describe('feedbackController.submitFeedback', () => {
 
     await feedbackCtl.submitFeedback(req, res);
 
+    // DB insert
     expect(db.query).toHaveBeenCalledWith(
       'INSERT INTO feedback (message) VALUES (?)',
       ['Great platform!']
     );
+
+    // transport config
+    expect(createTransportMock).toHaveBeenCalledWith({
+      service: 'gmail',
+      auth: { user: 'test@example.com', pass: 'app-pass' },
+    });
+
+    // outbound email
     expect(sendMailMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        from: expect.stringContaining('<test@example.com>'),
+        to: 'test@example.com',
         subject: 'New Feedback Submitted',
-        text: expect.stringContaining('Great platform!')
+        text: expect.stringContaining('Great platform!'),
       })
     );
+
+    // response
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Feedback submitted and emailed successfully.'
+        message: 'Feedback submitted and emailed successfully.',
       })
     );
   });
 
-  it('500 if DB insert fails', async () => {
+  it('500 if DB insert fails (and does not send email)', async () => {
     const req = mockReq({ body: { message: 'DB test fail' } });
     const res = mockRes();
 
@@ -85,6 +121,8 @@ describe('feedbackController.submitFeedback', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Internal server error.' })
     );
+    // ensure we didn't try to send an email
+    expect(sendMailMock).not.toHaveBeenCalled();
   });
 
   it('500 if sendMail fails', async () => {

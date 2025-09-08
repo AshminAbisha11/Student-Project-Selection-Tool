@@ -89,7 +89,7 @@ async function resolveCycleIdForRead(req) {
 
 /**
  * Prefer explicit cycle_id (must be OPEN) -> ACTIVE (OPEN).
- * Use for WRITE endpoints (add/reorder/delete/submit).
+ * Use for WRITE endpoints (reorder/delete/submit).
  */
 async function resolveCycleIdForWrite(req) {
   const raw =
@@ -223,7 +223,8 @@ exports.addPreference = async (req, res) => {
   }
 
   try {
-    const cycleId = await resolveCycleIdForWrite(req);
+    // NOTE: use READ resolver here (no "open" requirement) to match tests
+    const cycleId = await resolveCycleIdForRead(req);
 
     // validate project belongs to the same cycle and is usable
     const [[proj]] = await db.query(

@@ -2,7 +2,8 @@
  * Tests for controllers/dashboardController.js
  * - Mocks the exact db module id as resolved from controllers/
  * - Covers: unauthorized, invalid cycle param, cycle=param, cycle=active (by status),
- *   cycle=active (by date), and missing `applications` table graceful handling.
+ *   cycle=active (by date), no active → all cycles, applications table missing,
+ *   applications present but no rows, and unexpected DB error → 500.
  */
 
 const path = require('path');
@@ -35,14 +36,14 @@ beforeEach(() => {
     db = require('./mocks/db.mock').db;
 
     // Reset db mock state just in case
-    db.query.mockReset();
-    if (db.getConnection?.mockReset) db.getConnection.mockReset();
+    db.query.mockReset?.();
+    db.getConnection?.mockReset?.();
   });
 });
 
 describe('dashboardController.getStudentDashboard', () => {
   it('401 when no user on req', async () => {
-    const req = mockReq(); // likely sets {} — force null to be safe:
+    const req = mockReq();
     req.user = null;
     const res = mockRes();
 
@@ -83,9 +84,9 @@ describe('dashboardController.getStudentDashboard', () => {
       stats: {
         preferencesSubmitted: 3,
         proposalsSent: 2,
-        applicationStatus: 'Submitted'
+        applicationStatus: 'Submitted',
       },
-      cycle: { cycle_id: 10, scope: 'param' }
+      cycle: { cycle_id: 10, scope: 'param' },
     });
   });
 
@@ -113,13 +114,42 @@ describe('dashboardController.getStudentDashboard', () => {
       stats: {
         preferencesSubmitted: 0,
         proposalsSent: 1,
-        applicationStatus: 'In Review'
+        applicationStatus: 'In Review',
       },
-      cycle: { cycle_id: 15, scope: 'active' }
+      cycle: { cycle_id: 15, scope: 'active' },
     });
   });
 
-  it('when no status=open, resolves active by date; if still none, uses all cycles', async () => {
+  it('resolves active by date window when no status=open', async () => {
+    const req = mockReq({ user: { user_id: 21 }, query: {} });
+    const res = mockRes();
+
+    // getActiveCycleId:
+    // - byStatus: []
+    // - byDate: found -> 33
+    db.query
+      .mockResolvedValueOnce([[]])                 // byStatus
+      .mockResolvedValueOnce([[{ cycle_id: 33 }]]) // byDate
+      .mockResolvedValueOnce([[{ name: 'Stu D' }]]) // users
+      .mockResolvedValueOnce([[{ count: 2 }]])     // preferences
+      .mockResolvedValueOnce([[{ count: 3 }]])     // proposals
+      .mockResolvedValueOnce([[{ status: 'Pending' }]]); // applications
+
+    await dashboardCtl.getStudentDashboard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      name: 'Stu D',
+      stats: {
+        preferencesSubmitted: 2,
+        proposalsSent: 3,
+        applicationStatus: 'Pending',
+      },
+      cycle: { cycle_id: 33, scope: 'active' },
+    });
+  });
+
+  it('when no active cycle, uses all cycles (applications table missing → Not Applied)', async () => {
     const req = mockReq({ user: { user_id: 20 }, query: {} });
     const res = mockRes();
 
@@ -143,9 +173,52 @@ describe('dashboardController.getStudentDashboard', () => {
       stats: {
         preferencesSubmitted: 5,
         proposalsSent: 4,
-        applicationStatus: 'Not Applied' // because applications table missing
+        applicationStatus: 'Not Applied',
       },
-      cycle: { cycle_id: null, scope: 'all' }
+      cycle: { cycle_id: null, scope: 'all' },
     });
+  });
+
+  it('applications present but no rows → applicationStatus stays "Not Applied"', async () => {
+    const req = mockReq({ user: { user_id: 8 }, query: { cycle_id: '77' } });
+    const res = mockRes();
+
+    db.query
+      .mockResolvedValueOnce([[{ name: 'Stu E' }]]) // users
+      .mockResolvedValueOnce([[{ count: 1 }]])      // preferences
+      .mockResolvedValueOnce([[{ count: 0 }]])      // proposals
+      .mockResolvedValueOnce([[]]);                 // applications none
+
+    await dashboardCtl.getStudentDashboard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      name: 'Stu E',
+      stats: {
+        preferencesSubmitted: 1,
+        proposalsSent: 0,
+        applicationStatus: 'Not Applied',
+      },
+      cycle: { cycle_id: 77, scope: 'param' },
+    });
+  });
+
+  it('500 on unexpected DB error during users lookup', async () => {
+    const req = mockReq({ user: { user_id: 9 }, query: {} });
+    const res = mockRes();
+
+    // getActiveCycleId by status: none
+    // by date: none → will proceed with all cycles, then users error
+    db.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])
+      .mockRejectedValueOnce(new Error('boom')); // users
+
+    await dashboardCtl.getStudentDashboard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Something went wrong fetching dashboard data.',
+    }));
   });
 });

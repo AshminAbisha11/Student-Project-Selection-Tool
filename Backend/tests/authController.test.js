@@ -32,10 +32,30 @@ let db;
 
 // Utility: build an exact module ID for ../config/db as if required from controllers/
 function resolveDbFromControllers() {
-  // __dirname is .../backend/tests
   const controllersDir = path.join(__dirname, '..', 'controllers');
-  // Resolve the same module ID that "../controllers/authController.js" will resolve for '../config/db'
   return require.resolve('../config/db', { paths: [controllersDir] });
+}
+
+// helper to fetch the first INSERT call for a table from either query or execute
+function findInsertCall(table) {
+  const rx = new RegExp(`\\bINSERT\\s+INTO\\s+${table}\\b`, 'i');
+
+  const scan = (calls) => {
+    for (const call of calls) {
+      const [sql, params] = call;
+      if (typeof sql === 'string' && rx.test(sql)) return { sql, params };
+    }
+    return null;
+  };
+
+  const fromQuery = scan(db.query.mock.calls || []);
+  if (fromQuery) return { ...fromQuery, fn: 'query' };
+
+  if (db.execute) {
+    const fromExec = scan(db.execute.mock.calls || []);
+    if (fromExec) return { ...fromExec, fn: 'execute' };
+  }
+  return null;
 }
 
 beforeEach(() => {
@@ -46,17 +66,17 @@ beforeEach(() => {
   process.env.CLIENT_ORIGIN = 'http://localhost:3000';
   process.env.EMAIL_USER = 'test@example.com';
   process.env.EMAIL_APP_PASSWORD = 'app-pass';
+  delete process.env.ADMIN_BOOTSTRAP_CODES;
+  delete process.env.ADMIN_BOOTSTRAP_ALLOWED_DOMAINS;
 
   // Load everything in an isolated registry and mock the exact DB module ID
   jest.isolateModules(() => {
     const dbModuleId = resolveDbFromControllers();
-    // Provide our pool-like mock for *that exact* module id
     jest.doMock(dbModuleId, () => {
       const mocked = require('./mocks/db.mock');
       return mocked.db; // export the pool
     });
 
-    // Now that the db module id is mocked, require the controller
     try {
       authCtl = require('../controllers/authController');
     } catch {
@@ -70,9 +90,13 @@ beforeEach(() => {
       authCtl = require('../src/controllers/authController');
     }
 
-    // Grab the same db mock instance we exported above for assertions
-    // (require after doMock so it returns the mocked pool, not a real one)
+    // Grab same db mock instance
     db = require('./mocks/db.mock').db;
+
+    // reset mocks and ensure execute exists
+    db.query.mockReset();
+    if (!db.execute) db.execute = jest.fn();
+    db.execute.mockReset();
   });
 });
 
@@ -86,18 +110,23 @@ describe('authController', () => {
       const req = mockReq({
         body: {
           name: 'Alice',
-          email: 'Alice@aston.ac.uk',
+          email: 'Alice+alias@aston.ac.uk',
           password: 'Aa!aaa11',
           inviteCode: 'BOOT2',
         },
       });
       const res = mockRes();
 
+      // dup email?, count admins -> bootstrap
       db.query
-        .mockResolvedValueOnce([[undefined]]) // dup email?
-        .mockResolvedValueOnce([[{ c: 0 }]]) // count admins -> bootstrap
-        .mockResolvedValueOnce([{ insertId: 10 }]) // insert user
-        .mockResolvedValueOnce([{ insertId: 99 }]); // audit
+        .mockResolvedValueOnce([[undefined]])
+        .mockResolvedValueOnce([[{ c: 0 }]]);
+
+      // inserts (support either query or execute)
+      db.query.mockResolvedValueOnce([{ insertId: 10 }]);       // insert user via query (if used)
+      db.execute.mockResolvedValueOnce([{ insertId: 10 }]);     // insert user via execute (if used)
+      db.query.mockResolvedValueOnce([{ insertId: 99 }]);       // audit via query (if used)
+      db.execute.mockResolvedValueOnce([{ insertId: 99 }]);     // audit via execute (if used)
 
       await authCtl.adminSignup(req, res);
 
@@ -114,6 +143,48 @@ describe('authController', () => {
         'test-secret',
         expect.any(Object)
       );
+    });
+
+    it('bootstrap flow rejects when code required but missing/invalid', async () => {
+      process.env.ADMIN_BOOTSTRAP_CODES = 'BOOTX,BOOTY';
+
+      const req = mockReq({
+        body: { name: 'A', email: 'a@aston.ac.uk', password: 'Aa!aaa11' },
+      });
+      const res = mockRes();
+
+      db.query
+        .mockResolvedValueOnce([[undefined]]) // dup?
+        .mockResolvedValueOnce([[{ c: 0 }]]); // bootstrap
+
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      jest.clearAllMocks();
+      db.query
+        .mockResolvedValueOnce([[undefined]])
+        .mockResolvedValueOnce([[{ c: 0 }]]);
+      await authCtl.adminSignup(
+        mockReq({ body: { name: 'A', email: 'a@aston.ac.uk', password: 'Aa!aaa11', inviteCode: 'WRONG' } }),
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('bootstrap flow rejects when domain not allowed', async () => {
+      process.env.ADMIN_BOOTSTRAP_ALLOWED_DOMAINS = 'aston.ac.uk';
+
+      const req = mockReq({
+        body: { name: 'A', email: 'a@gmail.com', password: 'Aa!aaa11', inviteCode: 'ANY' },
+      });
+      const res = mockRes();
+
+      db.query
+        .mockResolvedValueOnce([[undefined]])
+        .mockResolvedValueOnce([[{ c: 0 }]]);
+
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
     });
 
     it('normal flow (requires DB invite) validates and consumes invite', async () => {
@@ -139,11 +210,20 @@ describe('authController', () => {
           max_uses: 3,
           uses: 1,
           expires_at: null
-        }]]) // invite row
-        .mockResolvedValueOnce([{ insertId: 123 }]) // insert user
-        .mockResolvedValueOnce([{ affectedRows: 1 }]) // update invite uses
-        .mockResolvedValueOnce([{ insertId: 456 }]) // claims insert
-        .mockResolvedValueOnce([{ insertId: 789 }]); // audit
+        }]]);
+
+      // insert user (support query or execute)
+      db.query.mockResolvedValueOnce([{ insertId: 123 }]);
+      db.execute.mockResolvedValueOnce([{ insertId: 123 }]);
+      // update invite uses, insert claims, audit (again support either)
+      db.query
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ insertId: 456 }])
+        .mockResolvedValueOnce([{ insertId: 789 }]);
+      db.execute
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{ insertId: 456 }])
+        .mockResolvedValueOnce([{ insertId: 789 }]);
 
       await authCtl.adminSignup(req, res);
 
@@ -158,11 +238,90 @@ describe('authController', () => {
       );
     });
 
-    it('rejects weak password', async () => {
-      const req = mockReq({ body: { name: 'A', email: 'a@a.com', password: 'weak' } });
+    it('normal flow rejects when invite locked to a different email', async () => {
+      const req = mockReq({
+        body: {
+          name: 'Bob',
+          email: 'bob@gmail.com',
+          password: 'Abcdef!1',
+          inviteCode: 'X',
+        },
+      });
       const res = mockRes();
+
+      db.query
+        .mockResolvedValueOnce([[undefined]])
+        .mockResolvedValueOnce([[{ c: 1 }]])
+        .mockResolvedValueOnce([[{
+          invite_id: 1,
+          role: 'admin',
+          email: 'other@gmail.com',
+          allowed_domain: null,
+          allowed_domains_json: null,
+          max_uses: 1,
+          uses: 0,
+          expires_at: null,
+        }]]);
+
       await authCtl.adminSignup(req, res);
       expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringMatching(/locked to a different email/i),
+      }));
+    });
+
+    it('normal flow rejects when invite domain not allowed', async () => {
+      const req = mockReq({
+        body: {
+          name: 'Bob',
+          email: 'bob@yahoo.com',
+          password: 'Abcdef!1',
+          inviteCode: 'X',
+        },
+      });
+      const res = mockRes();
+
+      db.query
+        .mockResolvedValueOnce([[undefined]])
+        .mockResolvedValueOnce([[{ c: 10 }]])
+        .mockResolvedValueOnce([[{
+          invite_id: 1,
+          role: 'admin',
+          email: null,
+          allowed_domain: null,
+          allowed_domains_json: JSON.stringify(['gmail.com']),
+          max_uses: 1,
+          uses: 0,
+          expires_at: null,
+        }]]);
+
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringMatching(/domain not allowed/i),
+      }));
+    });
+
+    it('rejects weak password & duplicate email', async () => {
+      let req = mockReq({ body: { name: 'A', email: 'a@a.com', password: 'weak' } });
+      let res = mockRes();
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      req = mockReq({ body: { name: 'A', email: 'a@a.com', password: 'Aa!aaaa1', inviteCode: 'X' } });
+      res = mockRes();
+      db.query.mockResolvedValueOnce([[{ user_id: 9 }]]);
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(409);
+    });
+
+    it('returns 500 on unexpected DB error', async () => {
+      const req = mockReq({ body: { name: 'A', email: 'a@a.com', password: 'Aa!aaaa1', inviteCode: 'X' } });
+      const res = mockRes();
+
+      db.query.mockRejectedValueOnce(new Error('boom'));
+      await authCtl.adminSignup(req, res);
+      expect(res.status).toHaveBeenCalledWith(500);
     });
   });
 
@@ -173,7 +332,7 @@ describe('authController', () => {
       const res = mockRes();
 
       db.query
-        .mockResolvedValueOnce([[
+        .mockResolvedValueOnce([[ // SELECT user
           { user_id: 5, email: 'user@x.com', name: 'U', role: 'student', password: 'hashed(P@ssw0rd!)' }
         ]])
         .mockResolvedValueOnce([{ affectedRows: 1 }]); // update last_login
@@ -194,15 +353,29 @@ describe('authController', () => {
       await authCtl.loginUser(req, res);
       expect(res.status).toHaveBeenCalledWith(400);
     });
+
+    it('fails when password mismatch', async () => {
+      const req = mockReq({ body: { email: 'user@x.com', password: 'wrong' } });
+      const res = mockRes();
+      db.query.mockResolvedValueOnce([[{ user_id: 1, email: 'user@x.com', name: 'U', role: 'student', password: 'hashed(right)' }]]);
+      await authCtl.loginUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('400 when missing fields', async () => {
+      const res = mockRes();
+      await authCtl.loginUser(mockReq({ body: { email: '' } }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
   });
 
   // ---------- registerUser ----------
   describe('registerUser', () => {
-    it('registers a student', async () => {
+    it('registers a student (keeps + aliases in email)', async () => {
       const req = mockReq({
         body: {
           name: 'Stu',
-          email: 'stu@a.com',
+          email: 'stu+alias@a.com',
           password: 'P@ssw0rd1',
           confirmPassword: 'P@ssw0rd1',
           programme: 'MSc',
@@ -212,8 +385,11 @@ describe('authController', () => {
       const res = mockRes();
 
       db.query
-        .mockResolvedValueOnce([[]]) // existing?
-        .mockResolvedValueOnce([{ insertId: 44 }]); // insert
+        .mockResolvedValueOnce([[]]); // existing?
+
+      // insert via query or execute
+      db.query.mockResolvedValueOnce([{ insertId: 44 }]);
+      db.execute.mockResolvedValueOnce([{ insertId: 44 }]);
 
       await authCtl.registerUser(req, res);
 
@@ -223,22 +399,88 @@ describe('authController', () => {
       }));
     });
 
-    it('rejects duplicate email', async () => {
+    it('normalizes non-student: programme is set to null on insert', async () => {
       const req = mockReq({
         body: {
-          name: 'Stu',
-          email: 'dup@a.com',
+          name: 'Sup',
+          email: 'sup@a.com',
           password: 'P@ssw0rd1',
           confirmPassword: 'P@ssw0rd1',
-          programme: 'MSc',
-          role: 'student'
+          programme: 'ShouldBeNull',
+          role: 'supervisor'
         }
       });
       const res = mockRes();
 
+      db.query.mockResolvedValueOnce([[]]); // existing?
+
+      // insert (support both)
+      db.query.mockResolvedValueOnce([{ insertId: 77 }]);
+      db.execute.mockResolvedValueOnce([{ insertId: 77 }]);
+
+      await authCtl.registerUser(req, res);
+
+      const call = findInsertCall('users');
+      expect(call).toBeTruthy();
+      const params = call.params;
+      // [name, email, hashed, programme, role]
+      expect(params[3]).toBeNull();
+      expect(params[4]).toBe('supervisor');
+
+      expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    it('rejects invalid email / missing programme / weak or mismatched passwords / duplicate', async () => {
+      // invalid email
+      let req = mockReq({
+        body: { name: 'X', email: 'bad@@mail', password: 'P@ssw0rd1', confirmPassword: 'P@ssw0rd1', role: 'student', programme: 'MSc' }
+      });
+      let res = mockRes();
+      await authCtl.registerUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // missing programme (student)
+      req = mockReq({
+        body: { name: 'X', email: 'ok@x.com', password: 'P@ssw0rd1', confirmPassword: 'P@ssw0rd1', role: 'student' }
+      });
+      res = mockRes();
+      await authCtl.registerUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // weak password
+      req = mockReq({
+        body: { name: 'X', email: 'ok@x.com', password: 'weak', confirmPassword: 'weak', role: 'student', programme: 'MSc' }
+      });
+      res = mockRes();
+      await authCtl.registerUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // mismatched
+      req = mockReq({
+        body: { name: 'X', email: 'ok@x.com', password: 'P@ssw0rd1', confirmPassword: 'Mismatch', role: 'student', programme: 'MSc' }
+      });
+      res = mockRes();
+      await authCtl.registerUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // duplicate
+      req = mockReq({
+        body: { name: 'X', email: 'dup@x.com', password: 'P@ssw0rd1', confirmPassword: 'P@ssw0rd1', role: 'student', programme: 'MSc' }
+      });
+      res = mockRes();
       db.query.mockResolvedValueOnce([[{ user_id: 1 }]]);
       await authCtl.registerUser(req, res);
       expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('500 on DB error', async () => {
+      const req = mockReq({
+        body: { name: 'X', email: 'ok@x.com', password: 'P@ssw0rd1', confirmPassword: 'P@ssw0rd1', role: 'student', programme: 'MSc' }
+      });
+      const res = mockRes();
+      db.query.mockRejectedValueOnce(new Error('boom'));
+      await authCtl.registerUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(500);
     });
   });
 
@@ -268,6 +510,25 @@ describe('authController', () => {
       await authCtl.forgotPassword(req, res);
       expect(res.status).toHaveBeenCalledWith(404);
     });
+
+    it('400 when email missing', async () => {
+      const res = mockRes();
+      await authCtl.forgotPassword(mockReq({ body: {} }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('500 when transporter fails', async () => {
+      mockSendMail.mockRejectedValueOnce(new Error('smtp down'));
+      const req = mockReq({ body: { email: 'reset@x.com' } });
+      const res = mockRes();
+
+      db.query
+        .mockResolvedValueOnce([[{ user_id: 1 }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+      await authCtl.forgotPassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
   });
 
   // ---------- resetPassword ----------
@@ -295,12 +556,47 @@ describe('authController', () => {
       await authCtl.resetPassword(req, res);
       expect(res.status).toHaveBeenCalledWith(400);
     });
+
+    it('400 when token or password missing', async () => {
+      const res = mockRes();
+      await authCtl.resetPassword(mockReq({ params: {}, body: { password: 'X' } }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      jest.clearAllMocks();
+      await authCtl.resetPassword(mockReq({ params: { token: 't' }, body: {} }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('500 on DB error', async () => {
+      const req = mockReq({ params: { token: 't' }, body: { password: 'Xy!23456' } });
+      const res = mockRes();
+      db.query.mockRejectedValueOnce(new Error('boom'));
+      await authCtl.resetPassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
   });
 
   // ---------- logout ----------
   describe('logoutUser', () => {
     it('blacklists token when present', async () => {
       const req = { headers: { authorization: 'Bearer hello' } };
+      const res = mockRes();
+      await authCtl.logoutUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('still 200 when no token', async () => {
+      const req = { headers: { authorization: '' } };
+      const res = mockRes();
+      await authCtl.logoutUser(req, res);
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    // UPDATED: controller returns 200 even if blacklisting fails
+    it('still 200 when blacklist fails', async () => {
+      const { addTokenToBlacklist } = require('../models/blacklistModel');
+      addTokenToBlacklist.mockRejectedValueOnce(new Error('fail'));
+      const req = { headers: { authorization: 'Bearer t' } };
       const res = mockRes();
       await authCtl.logoutUser(req, res);
       expect(res.status).toHaveBeenCalledWith(200);
@@ -339,16 +635,54 @@ describe('authController', () => {
       await authCtl.changePassword(req, res);
       expect(res.status).toHaveBeenCalledWith(401);
     });
+
+    it('400 when missing fields / weak new / 401 unauthorized / 404 not found / 500 error', async () => {
+      // missing fields
+      let req = mockReq({ user: { user_id: 1 }, body: { currentPassword: 'a' } });
+      let res = mockRes();
+      await authCtl.changePassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // unauthorized
+      req = mockReq({ body: { currentPassword: 'a', newPassword: 'Abc!1234' } });
+      res = mockRes();
+      await authCtl.changePassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(401);
+
+      // user not found
+      req = mockReq({ user: { user_id: 1 }, body: { currentPassword: 'a', newPassword: 'Abc!1234' } });
+      res = mockRes();
+      db.query.mockResolvedValueOnce([[]]);
+      await authCtl.changePassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(404);
+
+      // weak new
+      req = mockReq({ user: { user_id: 1 }, body: { currentPassword: 'Cur!1234', newPassword: 'weak' } });
+      res = mockRes();
+      db.query.mockResolvedValueOnce([[{ password: 'hashed(Cur!1234)' }]]);
+      await authCtl.changePassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      // 500 on DB error
+      req = mockReq({ user: { user_id: 1 }, body: { currentPassword: 'Cur!1234', newPassword: 'Abc!1234' } });
+      res = mockRes();
+      db.query
+        .mockResolvedValueOnce([[{ password: 'hashed(Cur!1234)' }]])
+        .mockRejectedValueOnce(new Error('boom'));
+      await authCtl.changePassword(req, res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
   });
 
   // ---------- me ----------
-it('returns 401 when no user', async () => {
-  const req = mockReq();
-  req.user = null; // manually force it
-  const res = mockRes();
-  await authCtl.me(req, res);
-  expect(res.status).toHaveBeenCalledWith(401);
-});
+  describe('me', () => {
+    it('returns 401 when no user', async () => {
+      const req = mockReq();
+      req.user = null; // manually force it
+      const res = mockRes();
+      await authCtl.me(req, res);
+      expect(res.status).toHaveBeenCalledWith(401);
+    });
 
     it('returns user when present', async () => {
       const req = mockReq({ user: { user_id: 1, name: 'X' } });
@@ -390,5 +724,25 @@ it('returns 401 when no user', async () => {
       await authCtl.adminLogin(req, res);
       expect(res.status).toHaveBeenCalledWith(403);
     });
-  });
 
+    it('400 when user not found or password mismatch', async () => {
+      let req = mockReq({ body: { email: 'none@x.com', password: 'x' } });
+      let res = mockRes();
+      db.query.mockResolvedValueOnce([[]]);
+      await authCtl.adminLogin(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+
+      req = mockReq({ body: { email: 'a@x.com', password: 'wrong' } });
+      res = mockRes();
+      db.query.mockResolvedValueOnce([[{ user_id: 1, email: 'a@x.com', name: 'A', role: 'admin', password: 'hashed(right)' }]]);
+      await authCtl.adminLogin(req, res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('400 when missing fields', async () => {
+      const res = mockRes();
+      await authCtl.adminLogin(mockReq({ body: { email: '' } }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+  });
+});
