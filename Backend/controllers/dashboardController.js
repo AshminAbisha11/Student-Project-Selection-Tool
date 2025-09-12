@@ -3,7 +3,6 @@ const db = require('../config/db');
 
 /* -------- Helpers: find active cycle -------- */
 async function getActiveCycleId() {
-  // Prefer explicit 'open' status
   const [byStatus] = await db.query(
     `SELECT cycle_id
        FROM allocation_cycles
@@ -13,7 +12,6 @@ async function getActiveCycleId() {
   );
   if (byStatus.length) return byStatus[0].cycle_id;
 
-  // Fallback to by-date window
   const [byDate] = await db.query(
     `SELECT cycle_id
        FROM allocation_cycles
@@ -30,7 +28,6 @@ exports.getStudentDashboard = async (req, res) => {
     console.log('Student ID from token:', studentId);
     if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-    // Decide cycle scope
     const raw = req.query?.cycle_id;
     let cycleId = null;
     let cycleScope = 'param';
@@ -42,7 +39,7 @@ exports.getStudentDashboard = async (req, res) => {
       cycleId = n;
     } else {
       cycleId = await getActiveCycleId();
-      cycleScope = cycleId ? 'active' : 'all'; // if no active cycle, count across all cycles
+      cycleScope = cycleId ? 'active' : 'all'; 
     }
 
     const cycleFilter = cycleId ? 'AND cycle_id = ?' : '';
@@ -91,7 +88,6 @@ exports.getStudentDashboard = async (req, res) => {
       );
       if (appRow?.status) applicationStatus = appRow.status;
     } catch (e) {
-      // If applications table doesn't exist, ignore gracefully
       if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
     }
 
@@ -104,8 +100,8 @@ exports.getStudentDashboard = async (req, res) => {
         applicationStatus
       },
       cycle: {
-        cycle_id: cycleId,         // null means "all cycles"
-        scope: cycleScope          // 'param' | 'active' | 'all'
+        cycle_id: cycleId,         
+        scope: cycleScope         
       }
     });
   } catch (error) {

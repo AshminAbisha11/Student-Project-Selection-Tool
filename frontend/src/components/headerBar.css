@@ -1,6 +1,6 @@
 /* ===== Header Container ===== */
 .header-bar{
-  position: sticky;           /* stay visible on scroll */
+  position: sticky;           
   top: 0;
   z-index: 100;
 
@@ -22,7 +22,7 @@
   font-size:20px;
   font-weight:700;
   white-space:nowrap;
-  color:#fff;                  /* title always white */
+  color:#fff;                  
   letter-spacing:.2px;
 }
 
@@ -58,9 +58,9 @@
 /* ===== Profile + Dropdown ===== */
 .profile-container{ position:relative; display:inline-block; }
 .profile-icon{
-  display:flex; align-items:center; gap:10px;   /* bigger gap for larger caret */
+  display:flex; align-items:center; gap:10px;  
   background:#e2d7fb; color:#341b55;
-  padding:9px 16px;                              /* slightly larger pill */
+  padding:9px 16px;                              
   border-radius:20px;
   font-size:18px;
   cursor:pointer;
@@ -73,7 +73,7 @@
 
 /* Bigger caret */
 .caret{
-  font-size:20px;                                /* bumped from 16px */
+  font-size:20px;                               
   line-height:1;
   transform: translateY(1px);
 }
@@ -122,8 +122,8 @@
 .profile-dropdown::before{
   content:"";
   position:absolute;
-  top:-14px; right:16px;                          /* was -12px */
-  border-width:0 14px 14px 14px;                  /* was 0 12px 12px 12px */
+  top:-14px; right:16px;                          
+  border-width:0 14px 14px 14px;                  
   border-style:solid;
   border-color:transparent transparent #fff transparent;
   filter:drop-shadow(0 -2px 2px rgba(0,0,0,.08));
@@ -159,6 +159,6 @@
 @media (max-width: 520px){
   .portal-title{ display:none; }
   .search-section input{ width:150px; }
-  .caret{ font-size:16px; transform: translateY(1px); }  /* scale down on very small screens */
+  .caret{ font-size:16px; transform: translateY(1px); }  
   .caret svg{ width:16px; height:16px; }
 }

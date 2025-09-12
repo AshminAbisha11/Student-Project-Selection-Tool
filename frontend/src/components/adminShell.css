@@ -66,7 +66,7 @@
     background .15s ease,
     transform .06s ease,
     border-color .15s ease,
-    opacity .12s ease;              /* for pressed transparency */
+    opacity .12s ease;              
 }
 .as-navlink:hover{
   background: var(--hover);
@@ -77,7 +77,7 @@
   border-color: var(--border);
   box-shadow:
     0 2px 12px rgba(47,42,85,.06),
-    0 0 0 2px rgba(111,53,200,.14) inset;  /* subtle brand ring */
+    0 0 0 2px rgba(111,53,200,.14) inset;  
 }
 /* Pressed effect — slightly transparent + tiny nudge */
 .as-navlink:active,
@@ -116,9 +116,9 @@
 
 /* ====== Main area (FULL WIDTH) ====== */
 .admin-main{
-  flex: 1;                 /* fill all space to the right of sidebar */
+  flex: 1;                 
   width: 100%;
-  max-width: none;         /* remove cap so it can stretch */
+  max-width: none;         
   box-sizing: border-box;
   padding: 28px 32px;
 }

@@ -1,4 +1,4 @@
-// Backend/controllers/adminController.js (invites section)
+// Backend/controllers/adminController.js 
 
 const db = require('../config/db');
 const crypto = require('crypto');
@@ -6,14 +6,13 @@ const crypto = require('crypto');
 // ---- helpers ----
 function makeInviteCode(prefix = 'ASTON', role = 'ADMIN') {
   const raw = crypto.randomBytes(8).toString('base64url').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const body = raw.slice(0, 12).match(/.{1,4}/g).join('-'); // AAAA-BBBB-CCCC
+  const body = raw.slice(0, 12).match(/.{1,4}/g).join('-'); 
   return `${prefix}-${role}-${body}`;
 }
 function sha256(s) {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
 function normalizeDomains({ allowed_domains, allowed_domain }) {
-  // Accept either a single string (legacy) or an array; default to Aston + Gmail
   let domains = [];
   if (Array.isArray(allowed_domains) && allowed_domains.length) {
     domains = allowed_domains;
@@ -22,7 +21,6 @@ function normalizeDomains({ allowed_domains, allowed_domain }) {
   } else {
     domains = ['aston.ac.uk', 'gmail.com'];
   }
-  // clean + dedupe
   domains = domains
     .map(d => (d || '').toString().toLowerCase().trim().replace(/^@/, ''))
     .filter(Boolean);
@@ -37,24 +35,22 @@ function safeParseJSON(s) {
 exports.createInvite = async (req, res) => {
   const actorId = req.user.user_id;
 
-  // payload: { role, email, allowed_domains?, allowed_domain?(legacy), max_uses, expires_at }
   let {
     role = 'admin',
     email = null,
-    allowed_domains,         // array of domains (preferred)
-    allowed_domain,          // legacy single domain support
+    allowed_domains,        
+    allowed_domain,          
     max_uses = 1,
     expires_at = null
   } = req.body || {};
 
-  role = String(role).toLowerCase(); // 'admin' | 'supervisor'
+  role = String(role).toLowerCase(); 
   if (!['admin', 'supervisor'].includes(role)) {
     return res.status(400).json({ message: 'role must be admin or supervisor' });
   }
 
   const domains = normalizeDomains({ allowed_domains, allowed_domain });
 
-  // generate a unique human-friendly code
   let code, codeHash, exists = true, tries = 0;
   while (exists) {
     if (tries++ > 5) return res.status(500).json({ message: 'could not generate code' });
@@ -74,7 +70,6 @@ exports.createInvite = async (req, res) => {
     [codeHash, email, null, JSON.stringify(domains), role, max_uses, expires_at, actorId]
   );
 
-  // audit
   await db.query(
     `INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, meta)
      VALUES (?,?,?,?,?)`,
@@ -82,7 +77,6 @@ exports.createInvite = async (req, res) => {
      JSON.stringify({ role, email, allowed_domains: domains, max_uses, expires_at })]
   );
 
-  // Return the plain code ONCE
   res.status(201).json({
     invite_id: r.insertId,
     code,
@@ -103,7 +97,6 @@ exports.listInvites = async (req, res) => {
      ORDER BY created_at DESC`
   );
 
-  // expose a unified allowed_domains array in the response
   const data = rows.map(r => {
     const list = safeParseJSON(r.allowed_domains_json) || (r.allowed_domain ? [r.allowed_domain] : []);
     return {

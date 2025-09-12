@@ -8,11 +8,11 @@ const fs = require('fs');
 const verifyToken = require('../middleware/authMiddleware');
 const proposalController = require('../controllers/proposalController');
 
-// --- ensure uploads dir exists ---
+
 const uploadDir = path.resolve(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// --- Multer setup ---
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => {

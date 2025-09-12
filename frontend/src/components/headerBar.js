@@ -56,7 +56,7 @@ const HeaderBar = ({ onSearch, onClear }) => {
   const onInputChange = (e) => {
     const v = e.target.value;
     setTerm(v);
-    if (v.trim() === '' && onClear) onClear(); // empty -> show all
+    if (v.trim() === '' && onClear) onClear(); 
   };
 
   return (

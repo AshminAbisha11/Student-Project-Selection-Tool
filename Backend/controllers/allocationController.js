@@ -107,7 +107,6 @@ async function resolveCycleId(req) {
  * keep the lower preference_order; ties → earlier submitted_at.
  */
 async function loadEligiblePreferences(conn, cycleId) {
-  // students already allocated this cycle (exclude)
   const [already] = await conn.query(
     `SELECT student_id FROM allocations WHERE cycle_id = ?`,
     [cycleId]
@@ -138,7 +137,6 @@ async function loadEligiblePreferences(conn, cycleId) {
 
   const filtered = rows.filter((r) => !alreadySet.has(r.student_id));
 
-  // De-duplicate by (student_id, project_id)
   const best = new Map();
   for (const r of filtered) {
     const key = `${r.student_id}:${r.project_id}`;
@@ -172,7 +170,6 @@ async function loadEligiblePreferences(conn, cycleId) {
  *   }
  */
 async function loadCapacities(conn, cycleId) {
-  // Try supervisor_meta path (single query overall — uses LEFT JOIN on allocations aggregate)
   try {
     const [rows] = await conn.query(
       `
@@ -199,7 +196,6 @@ async function loadCapacities(conn, cycleId) {
     );
     return { remainingPerSupervisor };
   } catch (e) {
-    // Handle missing table or column layout differences by falling back
     if (e?.code !== 'ER_NO_SUCH_TABLE' && e?.code !== 'ER_BAD_FIELD_ERROR') throw e;
   }
 
@@ -234,7 +230,6 @@ async function loadCapacities(conn, cycleId) {
     const used = Math.max(0, Number(allocatedMap.get(sup) || 0));
     remainingPerSupervisor.set(sup, Math.max(0, q - used));
   }
-  // ensure supervisors with allocations but zero current quota get 0 remaining
   for (const [sup] of allocatedMap) {
     if (!remainingPerSupervisor.has(sup)) remainingPerSupervisor.set(sup, 0);
   }
@@ -368,7 +363,7 @@ async function tryInsertAllocation(conn, a, cycleId) {
     );
     return ins.affectedRows === 1 ? 1 : 0;
   } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') return 0; // already has an allocation this cycle
+    if (e.code === 'ER_DUP_ENTRY') return 0; 
     throw e;
   }
 }
@@ -400,7 +395,6 @@ exports.commit = async (req, res) => {
 
     let inserted = 0;
     for (const a of toCommit) {
-      // Guard: student not already allocated in THIS cycle
       const [s] = await conn.query(
         `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
         [a.student_id, cycleId]
@@ -410,7 +404,6 @@ exports.commit = async (req, res) => {
       const didInsert = await tryInsertAllocation(conn, a, cycleId);
       if (!didInsert) continue;
 
-      // Lock and bump the project row (safer under concurrency)
       await conn.query(
         `SELECT project_id FROM projects WHERE project_id = ? FOR UPDATE`,
         [a.project_id]
@@ -425,7 +418,6 @@ exports.commit = async (req, res) => {
       inserted += 1;
     }
 
-    // Mark the cycle as committed (and back-fill close/commit timestamps if needed)
     await conn.query(
       `UPDATE allocation_cycles
          SET status='committed',
@@ -664,7 +656,6 @@ exports.listForSupervisor = async (req, res) => {
     const rawCycle = req.query.cycle_id;
     const hasCycle = rawCycle !== undefined && String(rawCycle).trim() !== '';
 
-    // default to latest committed cycle when none is specified
     let cycleId = null;
     if (hasCycle) {
       cycleId = Number(rawCycle);
@@ -672,7 +663,7 @@ exports.listForSupervisor = async (req, res) => {
       cycleId = await getLatestCommittedCycleId();
       if (!cycleId) {
         setNoStore(res);
-        return res.json([]); // nothing committed yet
+        return res.json([]); 
       }
     }
 

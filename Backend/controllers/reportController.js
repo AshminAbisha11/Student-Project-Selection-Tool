@@ -20,7 +20,6 @@ exports.allocationsCsv = async (req, res) => {
   const cycleId = req.query.cycle_id;
   if (!cycleId) return res.status(400).json({ message: "cycle_id is required" });
 
-  // NOTE: no a.created_at; names come from users.name
   const [rows] = await db.query(
     `
     SELECT

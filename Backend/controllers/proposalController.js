@@ -85,7 +85,6 @@ exports.listAcceptingSupervisors = async (req, res) => {
     try {
       cycleId = await resolveCycleId(req);
     } catch (e) {
-      // If no cycle at all, return empty (UI can show “no cycle open”)
       res.set('Cache-Control', 'no-store');
       return res.json([]);
     }
@@ -161,7 +160,7 @@ exports.submitProposal = async (req, res) => {
   let absToRemove = absPathFromReqFile(file);
 
   try {
-    const cycleId = await resolveCycleId(req); // throws if none/invalid
+    const cycleId = await resolveCycleId(req); 
 
     // Validate supervisor
     const supId = Number(supervisor_id);
@@ -183,7 +182,6 @@ exports.submitProposal = async (req, res) => {
     }
     const supervisor = supRows[0];
 
-    // Ensure supervisor has a student-idea pool project with seats in this cycle
     const [poolRows] = await db.query(
       `
       SELECT 
@@ -230,7 +228,6 @@ exports.submitProposal = async (req, res) => {
       });
     }
 
-    // Optional: avoid duplicate pending proposals to same supervisor in same cycle
     const [[dup]] = await db.query(
       `SELECT proposal_id FROM proposals
         WHERE student_id=? AND supervisor_id=? AND cycle_id=? AND status IN ('pending','submitted','under_review')
@@ -242,7 +239,6 @@ exports.submitProposal = async (req, res) => {
       return res.status(409).json({ message: 'You already have a proposal pending with this supervisor in this cycle.' });
     }
 
-    // Insert proposal (student-idea: project_id is NULL; topic_id NULL is fine)
     const storedFilename = file ? file.filename : null;
     const [result] = await db.query(
       `INSERT INTO proposals
@@ -251,7 +247,6 @@ exports.submitProposal = async (req, res) => {
       [studentId, supId, cycleId, null, title, description, storedFilename]
     );
 
-    // success: don’t attempt to clean file
     absToRemove = null;
 
     res.set('Cache-Control', 'no-store');
@@ -278,7 +273,6 @@ exports.getProposalsByStudent = async (req, res) => {
   const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-  // If a cycle is provided, filter; otherwise show all
   const raw = req.query?.cycle_id ?? req.query?.cycleId;
   const hasCycle = raw != null && String(raw).trim() !== '';
   const cycleId = hasCycle ? Number(raw) : null;
@@ -304,7 +298,6 @@ exports.getProposalsByStudent = async (req, res) => {
   `;
 
   try {
-    // Try with topics join first (if table exists)
     const sqlWithTopics = baseSQL.replace(
       'FROM proposals p',
       `FROM proposals p LEFT JOIN topics t ON t.topic_id = p.topic_id`
@@ -319,12 +312,10 @@ exports.getProposalsByStudent = async (req, res) => {
     res.set('Cache-Control', 'no-store');
     return res.json(rows || []);
   } catch (err) {
-    // If topics table is missing, fallback without it
     if (err?.code === 'ER_NO_SUCH_TABLE') {
       try {
         const params = hasCycle ? [studentId, cycleId] : [studentId];
         const [rows] = await db.query(baseSQL, params);
-        // add topic_name: null for compatibility
         rows.forEach(r => { if (!('topic_name' in r)) r.topic_name = null; });
         res.set('Cache-Control', 'no-store');
         return res.json(rows || []);
