@@ -151,7 +151,6 @@ exports.create = async (req, res) => {
     if (sqlCommit && sqlCommit < sqlClose)
       return res.status(400).json({ message: 'Commit must be on/after close' });
 
-    // Enforce uniqueness: at most one open / one committed cycle at a time
     if (status === 'open') {
       await db.query(`UPDATE allocation_cycles SET status='closed' WHERE status='open'`);
     }
@@ -219,7 +218,6 @@ exports.update = async (req, res) => {
     if (!fields.length)
       return res.status(400).json({ message: 'No fields to update' });
 
-    // Enforce uniqueness for open/committed
     if (status === 'open') {
       await db.query(
         `UPDATE allocation_cycles SET status='closed' WHERE status='open' AND cycle_id<>?`,
@@ -418,7 +416,6 @@ exports.closeNow = async (req, res) => {
 exports.commitNow = async (req, res) => {
   const { id } = req.params;
   try {
-    // Demote any previously committed cycles
     await db.query(
       `UPDATE allocation_cycles
          SET status='closed'
@@ -426,7 +423,6 @@ exports.commitNow = async (req, res) => {
       [id]
     );
 
-    // Mark this cycle as committed and stamp times
     await db.query(
       `UPDATE allocation_cycles
           SET status='committed',

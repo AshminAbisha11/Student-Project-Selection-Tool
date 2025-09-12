@@ -54,7 +54,9 @@ describe('supervisorController.getOverview', () => {
       .mockResolvedValueOnce([[{ projects: 5 }]])
       // pending proposals
       .mockResolvedValueOnce([[{ pendingProposals: 3 }]])
-      // allocated students (distinct)
+      // latest committed cycle id (used to scope allocations)
+      .mockResolvedValueOnce([[{ cycle_id: 11 }]])
+      // allocated students (distinct) for chosen cycle
       .mockResolvedValueOnce([[{ students: 7 }]]);
 
     await supCtl.getOverview(req, res);
@@ -63,6 +65,7 @@ describe('supervisorController.getOverview', () => {
       projects: 5,
       pendingProposals: 3,
       studentsAllocated: 7,
+      cycle_id_used_for_allocations: 11,
     });
   });
 });
@@ -84,8 +87,8 @@ describe('supervisorController.getMyProjects', () => {
     const res = mockRes();
 
     db.query
-      // getActiveOrLatestCycleIdForSupervisor -> open by status (controller calls an internal helper with its own queries; we simulate by returning an "open" cycle first)
-      .mockResolvedValueOnce([[{ cycle_id: 8 }]]) // getActiveCycleId by status
+      // getActiveCycleId by status (the helper returns here; no byDate needed)
+      .mockResolvedValueOnce([[{ cycle_id: 8 }]])
       // main listing SQL (window fn + filters)
       .mockResolvedValueOnce([[{ project_id: 1, is_student_pool: 0 }]]);
 
@@ -149,11 +152,9 @@ describe('supervisorController.getMyProjects', () => {
     const req = mockReq({ user: { user_id: 12 }, query: { cycle: 'all' } });
     const res = mockRes();
 
-    // Controller uses ROW_NUMBER() PARTITION trick and filters rn=1 for pool,
-    // so what we get back should already be de-duped. Just ensure it returns one.
     db.query.mockResolvedValueOnce([
       [
-        { project_id: 21, is_student_pool: 1, cycle_id: 6 }, // the "kept" one
+        { project_id: 21, is_student_pool: 1, cycle_id: 6 }, // the deduped one
       ],
     ]);
 
@@ -273,7 +274,7 @@ describe('supervisorController.decideProposal', () => {
       [{ proposal_id: 10, student_id: 5, supervisor_id: 77, project_id: null, cycle_id: 6 }],
     ]);
 
-    // Inside tx: lock a pool row
+    // Inside tx: lock a pool row and process allocation
     conn.query
       // pool row FOR UPDATE
       .mockResolvedValueOnce([[{ project_id: 222, quota: 3, spots_filled: 1 }]])
@@ -324,10 +325,9 @@ describe('supervisorController.decideProposal', () => {
       [{ proposal_id: 11, student_id: 5, supervisor_id: 77, project_id: null, cycle_id: 6 }],
     ]);
 
-    // pool row -> exists
+    // pool row -> exists, but seats full
     conn.query
       .mockResolvedValueOnce([[{ project_id: 333, quota: 1, spots_filled: 1 }]])
-      // allocated count shows full
       .mockResolvedValueOnce([[{ cnt: 1 }]]);
 
     await supCtl.decideProposal(req, res);
@@ -335,7 +335,7 @@ describe('supervisorController.decideProposal', () => {
     expect(conn.rollback).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(409);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringContaining('No seats') })
+      expect.objectContaining({ message: expect.stringMatching(/No seats/i) })
     );
   });
 

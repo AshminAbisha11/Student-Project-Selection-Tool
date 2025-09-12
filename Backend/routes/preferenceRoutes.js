@@ -2,23 +2,19 @@ const express = require('express');
 const router = express.Router();
 const preferenceController = require('../controllers/preferenceController');
 const verifyToken = require('../middleware/authMiddleware');
-const submissionWindow = require('../middleware/submissionWindow'); // blocks after deadline
+const submissionWindow = require('../middleware/submissionWindow'); 
 
 router.use(verifyToken);
 
-// ===== Read (always allowed) =====
 router.get('/', preferenceController.getPreferencesByStudent);
 
-// NEW: tell the client if the student already submitted (and when)
 router.get(['/submission', '/submitted'], preferenceController.getSubmissionStatus);
 
-// ===== Writes (blocked after deadline) =====
 router.post('/', submissionWindow, preferenceController.addPreference);
 router.put('/', submissionWindow, preferenceController.updatePreferenceOrder);
 router.patch('/contacted', submissionWindow, preferenceController.updateContactedSupervisor);
 router.delete('/:preferenceId', submissionWindow, preferenceController.deletePreference);
 
-// ===== Final submission =====
 router.post('/submit', submissionWindow, preferenceController.submitPreferences);
 
 module.exports = router;

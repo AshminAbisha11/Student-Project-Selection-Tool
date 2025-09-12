@@ -71,8 +71,8 @@
 /* Main fills remaining space */
 .admin-main{
   flex: 1 1 auto !important;
-  min-width: 0 !important;            /* prevents overflow issues */
-padding: 0 var(--main-pad) var(--main-pad) !important; /* top 0 */
+  min-width: 0 !important;           
+padding: 0 var(--main-pad) var(--main-pad) !important; 
   box-sizing: border-box !important;
 }
 
@@ -85,17 +85,14 @@ padding: 0 var(--main-pad) var(--main-pad) !important; /* top 0 */
   align-items:center !important;
   justify-content:space-between !important;
 
-  /* extend header to cancel .admin-main side padding */
   margin-left: calc(var(--main-pad) * -1) !important;
   margin-right: calc(var(--main-pad) * -1) !important;
 
-  /* keep content aligned to main padding */
   padding: 12px var(--main-pad) !important;
 
   background: rgba(255,255,255,.92) !important;
   border: 1px solid var(--border) !important;
 
-  /* flush against the sidebar on the left, rounded on the right */
   border-left: 0 !important;
   border-radius: 0 14px 14px 0 !important;
 
@@ -111,7 +108,7 @@ padding: 0 var(--main-pad) var(--main-pad) !important; /* top 0 */
 
 /* User / avatar / menu */
 .as-user{
-  position: relative !important;      /* anchor the dropdown */
+  position: relative !important;     
   display:flex !important;
   align-items:center !important;
   gap:8px !important;
@@ -163,5 +160,5 @@ padding: 0 var(--main-pad) var(--main-pad) !important; /* top 0 */
 
 /* ---------- Mobile tweaks ---------- */
 @media (max-width: 960px){
-  :root{ --main-pad: 18px; } /* tighter gutters on small screens */
+  :root{ --main-pad: 18px; } 
 }

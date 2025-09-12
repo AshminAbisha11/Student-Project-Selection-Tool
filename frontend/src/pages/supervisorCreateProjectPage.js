@@ -1,5 +1,5 @@
 // src/pages/SupervisorCreateProjectPage.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorNav from '../components/supervisorNav';
@@ -56,16 +56,102 @@ async function apiFetch(path, opts = {}, navigate) {
   if (res.status === 401 || res.status === 403) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    try { navigate('/login', { replace: true }); } catch {}
+    try {
+      navigate('/login', { replace: true });
+    } catch {}
     let data = {};
-    try { data = await res.json(); } catch {}
+    try {
+      data = await res.json();
+    } catch {}
     throw new Error(data?.message || 'Your session has expired. Please log in again.');
   }
 
   let data = {};
-  try { data = await res.json(); } catch {}
+  try {
+    data = await res.json();
+  } catch {}
   if (!res.ok) throw new Error(data?.message || 'Request failed');
   return data;
+}
+
+/* ------------ Lightweight Success Modal (no external CSS required) ------------ */
+function SuccessModal({ open, title = 'Success', message, onClose }) {
+  const dlgRef = useRef(null);
+  const backdropRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    dlgRef.current?.focus();
+    const onKey = (e) => e.key === 'Escape' && onClose?.();
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      prev?.focus?.();
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const backdrop = {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,.55)',
+    display: 'grid',
+    placeItems: 'center',
+    zIndex: 1000,
+    padding: 16,
+  };
+  const modal = {
+    width: 'min(560px, 92vw)',
+    background: '#0f0f13',
+    color: '#fff',
+    borderRadius: 14,
+    boxShadow: '0 10px 30px rgba(0,0,0,.45)',
+    padding: 20,
+    outline: 'none',
+  };
+  const actions = {
+    marginTop: 16,
+    display: 'flex',
+    justifyContent: 'flex-end',
+  };
+  const okBtn = {
+    padding: '10px 14px',
+    borderRadius: 10,
+    border: '1px solid transparent',
+    background: '#6a4cff',
+    color: '#fff',
+    cursor: 'pointer',
+    fontWeight: 700,
+  };
+
+  return (
+    <div
+      ref={backdropRef}
+      style={backdrop}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="success-title"
+      onMouseDown={(e) => {
+        if (e.target === backdropRef.current) onClose?.();
+      }}
+    >
+      <div style={modal} tabIndex={-1} ref={dlgRef}>
+        <h3 id="success-title" style={{ marginTop: 4, marginBottom: 10, fontSize: 18 }}>
+          {title}
+        </h3>
+        {message && (
+          <p style={{ lineHeight: 1.6, color: '#d7d7e0', margin: 0 }}>{message}</p>
+        )}
+        <div style={actions}>
+          <button style={okBtn} onClick={onClose}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function SupervisorCreateProjectPage() {
@@ -73,11 +159,18 @@ export default function SupervisorCreateProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // success modal
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
-  const user  = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
-    catch { return null; }
+  const user = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || 'null');
+    } catch {
+      return null;
+    }
   }, []);
 
   // Gate: must be logged in and be a supervisor
@@ -123,26 +216,26 @@ export default function SupervisorCreateProjectPage() {
     try {
       setSubmitting(true);
 
-      // POST /projects/create-project (backend will attach to active cycle if present; otherwise create a draft)
+      // POST /projects/create-project (backend attaches to active cycle if present; otherwise creates a draft)
       const payload = {
         title: form.title.trim(),
-        topic: form.topic.trim(),   // backend toggles student-idea pool via topic
+        topic: form.topic.trim(),
         description: form.description.trim(),
         full_description: form.full_description.trim(),
         prerequisites: form.prerequisites.trim(),
         quota: Number(form.quota),
       };
 
-      const data = await apiFetch('/projects/create-project', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }, navigate);
+      const data = await apiFetch(
+        '/projects/create-project',
+        { method: 'POST', body: JSON.stringify(payload) },
+        navigate
+      );
 
-      // The backend sends a helpful message about draft vs active
-      alert(data?.message || 'Project created successfully.');
-      navigate('/supervisor/my-projects');
+      // Show modal with backend message; navigate after close.
+      setSuccessMsg(data?.message || 'Project created successfully.');
+      setSuccessOpen(true);
     } catch (err) {
-      // If no active cycle and topic is student-pool, show clearer guidance
       const isPool = isStudentPoolTopic(form.topic);
       const friendly =
         isPool && /no active|active cycle|cycle/i.test(err.message || '')
@@ -155,6 +248,11 @@ export default function SupervisorCreateProjectPage() {
   };
 
   const isStudentIdea = isStudentPoolTopic(form.topic);
+
+  const closeSuccess = () => {
+    setSuccessOpen(false);
+    navigate('/supervisor/my-projects');
+  };
 
   return (
     <div className="sv-layout">
@@ -206,6 +304,7 @@ export default function SupervisorCreateProjectPage() {
                     <option>Cybersecurity</option>
                     <option>Human-Computer Interaction</option>
                     <option>Software Engineering</option>
+                    <option>Computer Science</option>
                     <option>Other</option>
                   </select>
                 </div>
@@ -224,9 +323,10 @@ export default function SupervisorCreateProjectPage() {
                     color: '#2a2d55',
                   }}
                 >
-                  <strong>Student Proposal Ideas</strong> is an opt-in pool. Your <em>Quota</em>{' '}
-                  below is the number of student ideas you’re willing to take this cycle.
-                  An active allocation cycle is required for this to be visible to students.
+                  <strong>Student Proposal Ideas</strong>. Your{' '}
+                  <em>Quota</em> below is the number of student ideas you’re willing to
+                  take this cycle. An active allocation cycle is required for this to be
+                  visible to students.
                 </div>
               )}
 
@@ -316,6 +416,14 @@ export default function SupervisorCreateProjectPage() {
           </div>
         </section>
       </main>
+
+      {/* Success popup */}
+      <SuccessModal
+        open={successOpen}
+        title="Project created"
+        message={successMsg}
+        onClose={closeSuccess}
+      />
     </div>
   );
 }

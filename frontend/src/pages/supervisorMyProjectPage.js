@@ -1,5 +1,5 @@
 // src/pages/supervisorMyProjectPage.jsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate, useLocation, NavLink } from 'react-router-dom';
 import './supervisorMyProjectPage.css';
 import SupervisorNav from '../components/supervisorNav';
@@ -7,9 +7,63 @@ import SupervisorHeader from '../components/supervisorHeader';
 import SupervisorProjectEditModal from '../components/supervisorProjectEditModal';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
-// If your backend is mounted at /supervisor-list, change this to '/supervisor-list'
-const SUP_BASE = '/supervisor';
 
+/* ---------- Confirm Modal ---------- */
+function ConfirmModal({
+  open,
+  title = 'Confirm',
+  message,
+  confirmText = 'Delete',
+  cancelText = 'Cancel',
+  busy = false,
+  onConfirm,
+  onCancel,
+}) {
+  const dlgRef = useRef(null);
+  const backdropRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    dlgRef.current?.focus();
+    const onKey = (e) => e.key === 'Escape' && onCancel?.();
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      prev?.focus?.();
+    };
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      ref={backdropRef}
+      className="sv-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      onMouseDown={(e) => {
+        if (e.target === backdropRef.current && !busy) onCancel?.();
+      }}
+    >
+      <div className="sv-modal" tabIndex={-1} ref={dlgRef}>
+        <h3 id="confirm-title">{title}</h3>
+        {message && <p>{message}</p>}
+        <div className="sv-modal-actions">
+          <button className="sv-btn sv-btn--ghost" onClick={onCancel} disabled={busy}>
+            {cancelText}
+          </button>
+          <button className="sv-btn sv-btn--danger" onClick={onConfirm} disabled={busy}>
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
 const chipClass = (status) => {
   switch ((status || '').toLowerCase()) {
     case 'approved': return 'chip chip--approved';
@@ -18,14 +72,16 @@ const chipClass = (status) => {
     default:         return 'chip';
   }
 };
-
 const formatDate = (d) => (d ? new Date(d).toLocaleString() : '');
 
 export default function MyProjectsPage() {
-  const [projects, setProjects]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [editId, setEditId]       = useState(null);
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState('');
+  const [editId, setEditId]     = useState(null);
+
+  const [deleteTarget, setDeleteTarget] = useState(null); // { id, title }
+  const [deleting, setDeleting] = useState(false);
 
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -39,7 +95,7 @@ export default function MyProjectsPage() {
   const token = localStorage.getItem('token');
   const user  = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
 
-  // auth + role guard
+  // role guard
   useEffect(() => {
     if (!token || !user) {
       navigate('/login', { replace: true });
@@ -59,27 +115,20 @@ export default function MyProjectsPage() {
     setLoading(true);
     setError('');
     try {
-      // Backend expects archived query: '0' | '1' | 'all'
       const archivedQ = showArchived ? '1' : '0';
-      // cycle filter: omit to prefer OPEN else most recent (see controller)
+      // ✅ Use the projects/my endpoint which honors ?archived=0|1
       const res = await fetch(
-        `${API}${SUP_BASE}/projects?archived=${archivedQ}`,
-        { headers: authHeaders }
+        `${API}/projects/my?archived=${archivedQ}&_=${Date.now()}`,
+        { headers: authHeaders, cache: 'no-store' }
       );
-
-      // Handle session expiry
       if (res.status === 401 || res.status === 403) {
         localStorage.clear();
         navigate('/login', { replace: true });
         return;
       }
-
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Failed to load projects');
-
-      // Controller returns { meta, projects: [...] }
-      const list = Array.isArray(data) ? data : (data.projects || []);
-      setProjects(list);
+      setProjects(Array.isArray(data) ? data : (data.projects || []));
     } catch (e) {
       console.error(e);
       setError(e.message || 'Failed to load projects');
@@ -89,68 +138,69 @@ export default function MyProjectsPage() {
     }
   }, [authHeaders, navigate, showArchived]);
 
-  useEffect(() => {
-    fetchMyProjects();
-  }, [fetchMyProjects]);
+  useEffect(() => { fetchMyProjects(); }, [fetchMyProjects]);
 
-  const onDelete = async (projectId) => {
-    if (!window.confirm('Delete this project permanently? This cannot be undone.')) return;
+  /* -------- Delete -------- */
+  const requestDelete = (id, title) => setDeleteTarget({ id, title });
+
+  const confirmDelete = async () => {
+    if (!deleteTarget?.id) return;
+    const id = deleteTarget.id;
+
+    // optimistic remove
+    setProjects((prev) => prev.filter((p) => p.project_id !== id));
+
+    setDeleting(true);
     try {
-      const res = await fetch(`${API}/projects/${projectId}`, {
-        method: 'DELETE',
-        headers: authHeaders,
-      });
+      const res = await fetch(`${API}/projects/${id}`, { method: 'DELETE', headers: authHeaders });
       if (res.status === 401 || res.status === 403) {
-        localStorage.clear();
-        navigate('/login', { replace: true });
-        return;
+        localStorage.clear(); navigate('/login', { replace: true }); return;
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Delete failed');
-      await fetchMyProjects();
+      await fetchMyProjects(); // keep in sync
     } catch (e) {
       console.error(e);
-      alert(e.message || 'Delete failed');
+      setError(e.message || 'Delete failed');
+      await fetchMyProjects();
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
+  /* -------- Archive / Unarchive -------- */
   const archiveProject = async (projectId) => {
     try {
       const res = await fetch(`${API}/projects/${projectId}/archive`, {
-        method: 'PATCH',
-        headers: authHeaders,
+        method: 'PATCH', headers: authHeaders,
       });
       if (res.status === 401 || res.status === 403) {
-        localStorage.clear();
-        navigate('/login', { replace: true });
-        return;
+        localStorage.clear(); navigate('/login', { replace: true }); return;
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Archive failed');
       await fetchMyProjects();
     } catch (e) {
       console.error(e);
-      alert(e.message || 'Archive failed');
+      setError(e.message || 'Archive failed');
     }
   };
 
   const unarchiveProject = async (projectId) => {
     try {
       const res = await fetch(`${API}/projects/${projectId}/unarchive`, {
-        method: 'PATCH',
-        headers: authHeaders,
+        method: 'PATCH', headers: authHeaders,
       });
       if (res.status === 401 || res.status === 403) {
-        localStorage.clear();
-        navigate('/login', { replace: true });
-        return;
+        localStorage.clear(); navigate('/login', { replace: true }); return;
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || 'Unarchive failed');
       await fetchMyProjects();
     } catch (e) {
       console.error(e);
-      alert(e.message || 'Unarchive failed');
+      setError(e.message || 'Unarchive failed');
     }
   };
 
@@ -160,11 +210,7 @@ export default function MyProjectsPage() {
     <div className="empty-state">
       <h3>{showArchived ? 'No archived projects' : 'No projects yet'}</h3>
       <p>{showArchived ? 'You have not archived any projects.' : 'Get started by creating your first project.'}</p>
-      {!showArchived && (
-        <button className="btn btn-primary" onClick={onCreate}>
-          Create Project
-        </button>
-      )}
+      {!showArchived && <button className="btn btn-primary" onClick={onCreate}>Create Project</button>}
     </div>
   );
 
@@ -184,7 +230,6 @@ export default function MyProjectsPage() {
       <main className="sv-main">
         <section className="myproj-panel">
           <div className="page-inner">
-            {/* Tabs + actions */}
             <div className="myproj-controls">
               <div className="seg-tabs">
                 <NavLink
@@ -238,14 +283,13 @@ export default function MyProjectsPage() {
                         </span>
 
                         {(Number(p.is_student_pool) === 1 ||
-                          /student proposal/i.test(`${p.title || ''} ${p.topic || ''}`)
-                        ) && (
+                          /student proposal/i.test(`${p.title || ''} ${p.topic || ''}`)) && (
                           <span className="chip chip--ghost">Student Proposal</span>
                         )}
 
-                        {Number(p.is_archived) === 1 ? (
+                        {Number(p.is_archived) === 1 && (
                           <span className="chip chip--archived">Archived</span>
-                        ) : null}
+                        )}
                       </div>
 
                       <h3 className="project-title">{p.title}</h3>
@@ -288,7 +332,7 @@ export default function MyProjectsPage() {
                               </button>
                               <button
                                 className="btn btn-danger"
-                                onClick={() => onDelete(p.project_id)}
+                                onClick={() => requestDelete(p.project_id, p.title)}
                               >
                                 Delete
                               </button>
@@ -328,6 +372,21 @@ export default function MyProjectsPage() {
           />
         )}
       </main>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete project"
+        message={
+          deleteTarget
+            ? `Delete “${deleteTarget.title || 'this project'}” permanently? This cannot be undone.`
+            : ''
+        }
+        confirmText={deleting ? 'Deleting…' : 'Delete'}
+        cancelText="Cancel"
+        busy={deleting}
+        onCancel={() => (!deleting ? setDeleteTarget(null) : null)}
+        onConfirm={() => (!deleting ? confirmDelete() : null)}
+      />
     </div>
   );
 }

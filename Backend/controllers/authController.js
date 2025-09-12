@@ -46,24 +46,20 @@ const validator = require('validator');
 function normalizeEmailKeepPlus(raw) {
   const e = String(raw || '').trim();
   if (!e) return '';
-  return validator.normalizeEmail(e, {
-    gmail_remove_dots: false,
-    gmail_remove_subaddress: false,
-    outlookdotcom_remove_subaddress: false,
-    yahoo_remove_subaddress: false,
-    icloud_remove_subaddress: false,
-  }) || e.toLowerCase(); 
+  return (
+    validator.normalizeEmail(e, {
+      gmail_remove_dots: false,
+      gmail_remove_subaddress: false,
+      outlookdotcom_remove_subaddress: false,
+      yahoo_remove_subaddress: false,
+      icloud_remove_subaddress: false,
+    }) || e.toLowerCase()
+  );
 }
 
 
 /* ========== ADMIN SIGNUP ==========
  * POST /auth/admin-signup
- * Body: { name, email, password, inviteCode? }
- * - First ever admin (bootstrap):
- *      If ADMIN_BOOTSTRAP_CODES is set, inviteCode MUST match one of them.
- *      If ADMIN_BOOTSTRAP_ALLOWED_DOMAINS is set, email domain must be allowed.
- * - Otherwise:
- *      inviteCode REQUIRED and validated against admin_invites table.
  * ================================== */
 exports.adminSignup = async (req, res) => {
   try {
@@ -99,13 +95,11 @@ exports.adminSignup = async (req, res) => {
     let invite = null;
 
     if (isBootstrap) {
-      // ---- Bootstrap path (first admin only)
       const envCodes = listFromEnv(process.env.ADMIN_BOOTSTRAP_CODES);
       const envDomains = listFromEnv(
         process.env.ADMIN_BOOTSTRAP_ALLOWED_DOMAINS
       ).map((d) => d.toLowerCase());
 
-      // If bootstrap codes exist in env, require a matching code
       if (envCodes.length) {
         const raw = String(inviteCode || '').trim();
         const code = raw
@@ -119,7 +113,6 @@ exports.adminSignup = async (req, res) => {
         }
       }
 
-      // If allowed domains are configured, enforce them
       if (envDomains.length) {
         const dom = emailDomain(email).toLowerCase();
         if (!envDomains.includes(dom)) {
@@ -129,7 +122,6 @@ exports.adminSignup = async (req, res) => {
         }
       }
     } else {
-      // ---- Normal path (subsequent admins): require DB invite
       const raw = String(inviteCode || '').trim();
       if (!raw) {
         return res.status(400).json({ message: 'Invite code is required.' });
@@ -153,7 +145,6 @@ exports.adminSignup = async (req, res) => {
         return res.status(400).json({ message: 'Invalid or expired invite code.' });
       }
 
-      // Email & domain checks
       const dom = emailDomain(email).toLowerCase();
       if (row.email && row.email.toLowerCase() !== email) {
         return res.status(400).json({ message: 'Invite locked to a different email.' });
@@ -173,7 +164,6 @@ exports.adminSignup = async (req, res) => {
       invite = row;
     }
 
-    // Create admin user
     const hashed = await bcrypt.hash(password, 10);
     const [ins] = await db.query(
       `INSERT INTO users (name, email, password, role, active, is_email_verified, created_at)
@@ -182,7 +172,6 @@ exports.adminSignup = async (req, res) => {
     );
     const userId = ins.insertId;
 
-    // Consume invite (if any)
     if (invite) {
       await db.query(
         `UPDATE admin_invites
@@ -197,7 +186,6 @@ exports.adminSignup = async (req, res) => {
       );
     }
 
-    // Audit
     await db.query(
       `INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, meta)
        VALUES (?,?,?,?,?)`,
@@ -210,7 +198,6 @@ exports.adminSignup = async (req, res) => {
       ]
     );
 
-    // JWT
     const payload = { user_id: userId, email, name, role: 'admin' };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
 
@@ -271,7 +258,7 @@ exports.registerUser = async (req, res) => {
   try {
     let { name, email, password, confirmPassword, programme, role } = req.body || {};
     name = String(name || '').trim();
-    email = normalizeEmailKeepPlus(email);    // <-- keep +alias
+    email = normalizeEmailKeepPlus(email); 
     role = String(role || '').trim().toLowerCase();
 
     if (!name || !email || !password || !confirmPassword || !role) {
@@ -282,7 +269,6 @@ exports.registerUser = async (req, res) => {
     }
     if (role !== 'student') programme = null;
 
-    // allow '+' in the local part
     const emailRegex = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ message: 'Invalid email format.' });
@@ -290,7 +276,8 @@ exports.registerUser = async (req, res) => {
 
     if (!pwStrong(password)) {
       return res.status(400).json({
-        message: 'Password must be at least 8 characters, with upper, lower, number and special character.',
+        message:
+          'Password must be at least 8 characters with upper, lower, number and special character.',
       });
     }
     if (password !== confirmPassword) {
@@ -398,14 +385,50 @@ exports.resetPassword = async (req, res) => {
  * Header: Authorization: Bearer <token>
  * ===================================== */
 exports.logoutUser = async (req, res) => {
-  try {
-    const token = getBearer(req);
-    if (token && token !== 'null' && token !== 'undefined') {
-      await addTokenToBlacklist(token);
+  const accessToken = getBearer(req);
+  const refreshToken =
+    req.cookies?.refreshToken ||
+    req.body?.refreshToken ||
+    null;
+
+  const clear = () =>
+    res.clearCookie?.('refreshToken', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      path: '/',
+    });
+
+  const blacklistOne = async (tok, type) => {
+    if (!tok || tok === 'null' || tok === 'undefined') return true;
+    if (typeof addTokenToBlacklist === 'function') {
+      const result = await addTokenToBlacklist(tok, type);
+      if (result === false || (result && result.ok === false)) {
+        throw new Error('Blacklist helper reported failure');
+      }
+      return true;
     }
+    await db.query(
+      `INSERT INTO token_blacklist (token, type, blacklisted_at)
+       VALUES (?, ?, NOW())`,
+      [tok, type]
+    );
+    return true;
+  };
+
+  try {
+    const ops = [];
+    if (accessToken) ops.push(blacklistOne(accessToken, 'access'));
+    if (refreshToken) ops.push(blacklistOne(refreshToken, 'refresh'));
+    await Promise.all(ops); 
+
+    clear();
+    res.set('Cache-Control', 'no-store');
     return res.status(200).json({ message: 'Logout successful' });
   } catch (error) {
     console.error('Logout error:', error);
+    clear();
+    res.set('Cache-Control', 'no-store');
     return res.status(500).json({ message: 'Logout failed' });
   }
 };

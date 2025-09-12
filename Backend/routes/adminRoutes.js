@@ -4,7 +4,6 @@ const router = express.Router();
 
 const admin = require('../controllers/adminController');
 
-// OPTIONAL but recommended:
 const verifyToken = require('../middleware/authMiddleware');
 const requireAdmin = require('../middleware/requireAdmin');
 

@@ -1,29 +1,35 @@
-// src/controllers/allocationController.js
-const db = require('../config/db'); // mysql2/promise pool
+// controllers/allocationController.js
 
-// ---------------- Config (tweakable weights) ----------------
+const db = require('../config/db');
+
 const WEIGHTS = {
-  preferencePoints: { 1: 100, 2: 80, 3: 60, 4: 40, 5: 20 },
-  contactedBonus: { Yes: 50, No: 0 },
-  timing: { maxStart: 30, perProjectStep: 3 },
+  preferencePoints: { 1: 100, 2: 85, 3: 70, 4: 55, 5: 40 },
+  contactedBonus: { Yes: 10, No: 0 },
+  timing: { maxStart: 20, perProjectStep: 2 },
 };
 
-// ---------------- Helpers ----------------
+/* ---------------- small helpers ---------------- */
+const setNoStore = (res) => {
+  try { res.set?.('Cache-Control', 'no-store'); } catch (_) {}
+};
+
 const normContacted = (v) => {
-  if (v == null) return 'No';
-  const s = String(v).trim().toLowerCase();
-  return s === 'yes' ? 'Yes' : 'No';
+  const s = String(v ?? '').trim().toLowerCase();
+  return ['yes', 'y', 'true', '1'].includes(s) ? 'Yes' : 'No';
 };
 
 const scorePair = (prefOrder, contacted, rank) => {
   const prefPts = WEIGHTS.preferencePoints[Number(prefOrder)] || 0;
   const contactedPts = WEIGHTS.contactedBonus[normContacted(contacted)] || 0;
   const r = Math.max(1, Number(rank) || 1);
-  const timePts = Math.max(0, WEIGHTS.timing.maxStart - (r - 1) * WEIGHTS.timing.perProjectStep);
+  const timePts = Math.max(
+    0,
+    WEIGHTS.timing.maxStart - (r - 1) * WEIGHTS.timing.perProjectStep
+  );
   return prefPts + contactedPts + timePts;
 };
 
-// ----- Cycle helpers -----
+/* ---------------- Cycle helpers ---------------- */
 async function getMostRecentCycleId() {
   const [r] = await db.query(
     `SELECT cycle_id FROM allocation_cycles
@@ -70,14 +76,10 @@ async function cycleExists(cycleId) {
   return r.length > 0;
 }
 
-/** Resolve cycle to use: prefer middleware > explicit cycle_id > active > most recent. */
 async function resolveCycleId(req) {
-  if (req.cycleId) {
-    return { cycleId: Number(req.cycleId), source: 'middleware' };
-  }
+  if (req.cycleId) return { cycleId: Number(req.cycleId), source: 'middleware' };
 
   const raw = req.body?.cycle_id ?? req.query?.cycle_id ?? null;
-
   if (raw != null && String(raw).trim() !== '') {
     const cid = Number(raw);
     if (!Number.isInteger(cid) || cid <= 0 || !(await cycleExists(cid))) {
@@ -99,15 +101,18 @@ async function resolveCycleId(req) {
   throw err;
 }
 
+/**
+ * Load preferences for the cycle that point to APPROVED projects in the SAME cycle,
+ * excluding students already allocated in that cycle. De-duplicate per (student, project):
+ * keep the lower preference_order; ties → earlier submitted_at.
+ */
 async function loadEligiblePreferences(conn, cycleId) {
-  // students already allocated this cycle (exclude)
   const [already] = await conn.query(
     `SELECT student_id FROM allocations WHERE cycle_id = ?`,
     [cycleId]
   );
-  const alreadySet = new Set(already.map(r => r.student_id));
+  const alreadySet = new Set(already.map((r) => r.student_id));
 
-  // preferences that point to APPROVED projects in SAME cycle
   const [rows] = await conn.query(
     `
     SELECT
@@ -130,51 +135,106 @@ async function loadEligiblePreferences(conn, cycleId) {
     [cycleId, cycleId]
   );
 
-  return rows.filter(r => !alreadySet.has(r.student_id));
-}
+  const filtered = rows.filter((r) => !alreadySet.has(r.student_id));
 
-// capacities are CYCLE-SCOPED
-async function loadCapacities(conn, cycleId) {
-  // 1) Read total quota per supervisor from supervisor_meta
-  let supQuotaRows = [];
-  try {
-    [supQuotaRows] = await conn.query(
-      `SELECT supervisor_id AS supervisor_id, quota_total FROM supervisor_meta`
-    );
-  } catch (e) {
-    if (e.code === 'ER_BAD_FIELD_ERROR') {
-      const [altRows] = await conn.query(
-        `SELECT user_id AS supervisor_id, quota_total FROM supervisor_meta`
-      );
-      supQuotaRows = altRows;
-    } else if (e.code === 'ER_NO_SUCH_TABLE') {
-      supQuotaRows = [];
-    } else {
-      throw e;
+  const best = new Map();
+  for (const r of filtered) {
+    const key = `${r.student_id}:${r.project_id}`;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, r);
+      continue;
+    }
+    const currOrder = Number(r.preference_order ?? 99);
+    const prevOrder = Number(prev.preference_order ?? 99);
+    if (
+      currOrder < prevOrder ||
+      (currOrder === prevOrder &&
+        new Date(r.submitted_at || 0) < new Date(prev.submitted_at || 0))
+    ) {
+      best.set(key, r);
     }
   }
 
-  const supervisorQuota = new Map(
-    supQuotaRows.map(r => [Number(r.supervisor_id), Number(r.quota_total || 0)])
-  );
+  return [...best.values()];
+}
 
-  // 2) Count allocations per supervisor in THIS cycle
+/**
+ * Capacity loader (cycle-scoped) with EXACTLY:
+ *  - 1 query when supervisor_meta exists (capacity/quota_total minus allocated)
+ *  - 2 queries fallback when supervisor_meta is missing
+ *
+ * Returns:
+ *   {
+ *     remainingPerSupervisor: Map<supervisor_id, remainingSeats>
+ *   }
+ */
+async function loadCapacities(conn, cycleId) {
+  try {
+    const [rows] = await conn.query(
+      `
+      SELECT sm.supervisor_id,
+             GREATEST(
+               COALESCE(sm.capacity, sm.quota_total, 0) - COALESCE(a.cnt, 0),
+               0
+             ) AS remaining
+        FROM supervisor_meta sm
+        LEFT JOIN (
+          SELECT supervisor_id, COUNT(*) AS cnt
+            FROM allocations
+           WHERE cycle_id = ?
+             AND status = 'allocated'
+           GROUP BY supervisor_id
+        ) a
+          ON a.supervisor_id = sm.supervisor_id
+       WHERE sm.cycle_id = ?
+      `,
+      [cycleId, cycleId]
+    );
+    const remainingPerSupervisor = new Map(
+      rows.map((r) => [Number(r.supervisor_id), Math.max(0, Number(r.remaining || 0))])
+    );
+    return { remainingPerSupervisor };
+  } catch (e) {
+    if (e?.code !== 'ER_NO_SUCH_TABLE' && e?.code !== 'ER_BAD_FIELD_ERROR') throw e;
+  }
+
+  // Fallback path (2 queries): allocated per supervisor + sum of project quotas per supervisor
   const [supLoad] = await conn.query(
     `
     SELECT pr.supervisor_id, COUNT(*) AS c
-    FROM allocations a
-    JOIN projects pr ON pr.project_id = a.project_id
-    WHERE a.cycle_id = ?
-    GROUP BY pr.supervisor_id
+      FROM allocations a
+      JOIN projects pr ON pr.project_id = a.project_id
+     WHERE a.cycle_id = ?
+       AND a.status = 'allocated'
+     GROUP BY pr.supervisor_id
     `,
     [cycleId]
   );
+  const allocatedMap = new Map(supLoad.map((r) => [Number(r.supervisor_id), Number(r.c)]));
 
-  const supervisorAllocated = new Map(
-    supLoad.map(r => [Number(r.supervisor_id), Number(r.c)])
+  const [perSupQuota] = await conn.query(
+    `
+    SELECT supervisor_id, COALESCE(SUM(quota),0) AS q
+      FROM projects
+     WHERE cycle_id = ?
+       AND COALESCE(is_archived,0) = 0
+     GROUP BY supervisor_id
+    `,
+    [cycleId]
   );
+  const remainingPerSupervisor = new Map();
+  for (const r of perSupQuota) {
+    const sup = Number(r.supervisor_id);
+    const q = Math.max(0, Number(r.q || 0));
+    const used = Math.max(0, Number(allocatedMap.get(sup) || 0));
+    remainingPerSupervisor.set(sup, Math.max(0, q - used));
+  }
+  for (const [sup] of allocatedMap) {
+    if (!remainingPerSupervisor.has(sup)) remainingPerSupervisor.set(sup, 0);
+  }
 
-  return { supervisorQuota, supervisorAllocated };
+  return { remainingPerSupervisor };
 }
 
 function rankBySubmissionWithinProject(prefs) {
@@ -184,8 +244,12 @@ function rankBySubmissionWithinProject(prefs) {
     byProject.get(r.project_id).push(r);
   }
   for (const arr of byProject.values()) {
-    arr.sort((a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0));
-    arr.forEach((r, i) => { r.rankWithinProject = i + 1; });
+    arr.sort(
+      (a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0)
+    );
+    arr.forEach((r, i) => {
+      r.rankWithinProject = i + 1;
+    });
   }
   return prefs;
 }
@@ -203,7 +267,8 @@ function sortCandidates(cands) {
 }
 
 function greedySelect(candidates, capacities) {
-  const { supervisorQuota, supervisorAllocated } = capacities;
+  const { remainingPerSupervisor } = capacities;
+
   const projectRemaining = new Map();
   const supervisorRemaining = new Map();
   const assigned = new Set();
@@ -211,14 +276,15 @@ function greedySelect(candidates, capacities) {
 
   for (const c of candidates) {
     if (!projectRemaining.has(c.project_id)) {
-      const left = Math.max(0, (Number(c.quota) || 0) - (Number(c.spots_filled) || 0));
+      const left = Math.max(
+        0,
+        (Number(c.quota) || 0) - (Number(c.spots_filled) || 0)
+      );
       projectRemaining.set(c.project_id, left);
     }
     if (!supervisorRemaining.has(c.supervisor_id)) {
-      const cap =
-        (supervisorQuota.get(c.supervisor_id) || 0) -
-        (supervisorAllocated.get(c.supervisor_id) || 0);
-      supervisorRemaining.set(c.supervisor_id, Math.max(0, cap));
+      const cap = Math.max(0, Number(remainingPerSupervisor.get(c.supervisor_id) ?? 0));
+      supervisorRemaining.set(c.supervisor_id, cap);
     }
   }
 
@@ -239,14 +305,14 @@ function greedySelect(candidates, capacities) {
   return result;
 }
 
-// ---------------- Preview (no writes) ----------------
+/* ---------------- Preview (no writes) ---------------- */
 exports.preview = async (req, res) => {
   try {
     const { cycleId } = await resolveCycleId(req);
 
     let prefs = await loadEligiblePreferences(db, cycleId);
     if (!prefs.length) {
-      res.set('Cache-Control', 'no-store');
+      setNoStore(res);
       return res.json({
         allocations: [],
         meta: { reason: 'no-eligible-preferences', cycleId },
@@ -254,10 +320,14 @@ exports.preview = async (req, res) => {
     }
 
     prefs = rankBySubmissionWithinProject(prefs);
-    const candidates = prefs.map(r => ({
+    const candidates = prefs.map((r) => ({
       ...r,
       contacted_supervisor: normContacted(r.contacted_supervisor),
-      score: scorePair(r.preference_order, r.contacted_supervisor, r.rankWithinProject),
+      score: scorePair(
+        r.preference_order,
+        r.contacted_supervisor,
+        r.rankWithinProject
+      ),
     }));
 
     const selected = greedySelect(
@@ -265,7 +335,7 @@ exports.preview = async (req, res) => {
       await loadCapacities(db, cycleId)
     );
 
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.json({
       allocations: selected,
       meta: {
@@ -282,7 +352,7 @@ exports.preview = async (req, res) => {
   }
 };
 
-// helper: insert one allocation, return 1 if inserted, 0 if duplicate
+/* helper: insert one allocation, return 1 if inserted, 0 if duplicate */
 async function tryInsertAllocation(conn, a, cycleId) {
   try {
     const [ins] = await conn.query(
@@ -293,12 +363,12 @@ async function tryInsertAllocation(conn, a, cycleId) {
     );
     return ins.affectedRows === 1 ? 1 : 0;
   } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') return 0; // already has an allocation this cycle
+    if (e.code === 'ER_DUP_ENTRY') return 0; 
     throw e;
   }
 }
 
-// ---------------- Commit (transactional writes) ----------------
+/* ---------------- Commit (transactional writes) ---------------- */
 exports.commit = async (req, res) => {
   let conn;
   try {
@@ -309,10 +379,14 @@ exports.commit = async (req, res) => {
 
     let prefs = await loadEligiblePreferences(conn, cycleId);
     prefs = rankBySubmissionWithinProject(prefs);
-    const candidates = prefs.map(r => ({
+    const candidates = prefs.map((r) => ({
       ...r,
       contacted_supervisor: normContacted(r.contacted_supervisor),
-      score: scorePair(r.preference_order, r.contacted_supervisor, r.rankWithinProject),
+      score: scorePair(
+        r.preference_order,
+        r.contacted_supervisor,
+        r.rankWithinProject
+      ),
     }));
     const toCommit = greedySelect(
       sortCandidates(candidates),
@@ -321,7 +395,6 @@ exports.commit = async (req, res) => {
 
     let inserted = 0;
     for (const a of toCommit) {
-      // double-check student hasn't been allocated in THIS cycle
       const [s] = await conn.query(
         `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
         [a.student_id, cycleId]
@@ -331,7 +404,10 @@ exports.commit = async (req, res) => {
       const didInsert = await tryInsertAllocation(conn, a, cycleId);
       if (!didInsert) continue;
 
-      // keep spots_filled in sync only when we actually inserted
+      await conn.query(
+        `SELECT project_id FROM projects WHERE project_id = ? FOR UPDATE`,
+        [a.project_id]
+      );
       await conn.query(
         `UPDATE projects
            SET spots_filled = LEAST(spots_filled + 1, quota)
@@ -342,7 +418,6 @@ exports.commit = async (req, res) => {
       inserted += 1;
     }
 
-    // Mark the cycle as committed (and back-fill close/commit timestamps if needed)
     await conn.query(
       `UPDATE allocation_cycles
          SET status='committed',
@@ -353,7 +428,7 @@ exports.commit = async (req, res) => {
     );
 
     await conn.commit();
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.json({ message: 'Allocations committed', inserted, cycleId });
   } catch (err) {
     if (conn) try { await conn.rollback(); } catch {}
@@ -366,7 +441,7 @@ exports.commit = async (req, res) => {
   }
 };
 
-// ---------------- Manual allocate (cycle-aware) ----------------
+/* ---------------- Manual allocate (cycle-aware) ---------------- */
 exports.allocate = async (req, res) => {
   const supervisorId = req.user.user_id;
   const { project_id, student_id, cycle_id } = req.body;
@@ -388,12 +463,12 @@ exports.allocate = async (req, res) => {
       `SELECT 1 FROM allocations WHERE student_id = ? AND cycle_id = ? FOR UPDATE`,
       [student_id, cycleId]
     );
-    if (existsStudent.length) {
-      throw new Error('Student already allocated to a project for this cycle');
-    }
+    if (existsStudent.length) throw new Error('Student already allocated to a project for this cycle');
 
     const [rows] = await conn.query(
-      'SELECT project_id, supervisor_id, quota, spots_filled FROM projects WHERE project_id = ? FOR UPDATE',
+      `SELECT project_id, supervisor_id, quota, spots_filled
+         FROM projects
+        WHERE project_id = ? FOR UPDATE`,
       [project_id]
     );
     if (!rows.length) throw new Error('Project not found');
@@ -415,7 +490,7 @@ exports.allocate = async (req, res) => {
     );
 
     await conn.commit();
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.status(201).json({ message: 'Student allocated successfully', cycle_id: cycleId });
   } catch (err) {
     if (conn) try { await conn.rollback(); } catch {}
@@ -428,7 +503,7 @@ exports.allocate = async (req, res) => {
   }
 };
 
-// ---------------- Manual deallocate ----------------
+/* ---------------- Manual deallocate ---------------- */
 exports.deallocate = async (req, res) => {
   const supervisorId = req.user.user_id;
   const { allocation_id } = req.params;
@@ -452,17 +527,17 @@ exports.deallocate = async (req, res) => {
     );
 
     await conn.commit();
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.json({ message: 'Allocation removed' });
   } catch (err) {
-    await conn.rollback();
+    try { await conn.rollback(); } catch {}
     return res.status(400).json({ message: err.message || 'Deallocation failed' });
   } finally {
     conn.release();
   }
 };
 
-// ---------------- Accept a Student-Idea Proposal (cycle-aware) ----------------
+/* ---------------- Accept a Student-Idea Proposal (cycle-aware) ---------------- */
 exports.acceptStudentIdea = async (req, res) => {
   const supervisorId = req.user?.user_id;
   const { proposal_id } = req.body;
@@ -476,7 +551,7 @@ exports.acceptStudentIdea = async (req, res) => {
 
     const { cycleId } = await resolveCycleId(req);
 
-    // 1) Lock proposal (do not require proposals.cycle_id column)
+    // 1) Lock proposal
     const [propRows] = await conn.query(
       `
       SELECT p.proposal_id, p.student_id, p.supervisor_id, p.project_id, p.status
@@ -561,7 +636,7 @@ exports.acceptStudentIdea = async (req, res) => {
     );
 
     await conn.commit();
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.json({ message: 'Proposal accepted and allocated.', allocation_id: ins.insertId });
   } catch (err) {
     try { await conn.rollback(); } catch {}
@@ -574,22 +649,21 @@ exports.acceptStudentIdea = async (req, res) => {
   }
 };
 
-// ---------------- NEW: list & detail for Allocated Students UI ----------------
+/* ---------------- list & detail for Allocated Students UI ---------------- */
 exports.listForSupervisor = async (req, res) => {
   try {
     const sid = req.user.user_id;
     const rawCycle = req.query.cycle_id;
     const hasCycle = rawCycle !== undefined && String(rawCycle).trim() !== '';
 
-    // default to latest committed cycle when none is specified
     let cycleId = null;
     if (hasCycle) {
       cycleId = Number(rawCycle);
     } else {
       cycleId = await getLatestCommittedCycleId();
       if (!cycleId) {
-        res.set('Cache-Control', 'no-store');
-        return res.json([]); // nothing committed yet
+        setNoStore(res);
+        return res.json([]); 
       }
     }
 
@@ -630,7 +704,7 @@ exports.listForSupervisor = async (req, res) => {
     `;
 
     const [rows] = await db.query(sql, [sid, cycleId]);
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     res.json(rows);
   } catch (e) {
     console.error('listForSupervisor error:', e);
@@ -682,7 +756,7 @@ exports.getOne = async (req, res) => {
     );
 
     if (!rows.length) return res.status(404).json({ message: 'Allocation not found' });
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     res.json(rows[0]);
   } catch (e) {
     console.error('getOne error:', e);
@@ -690,8 +764,7 @@ exports.getOne = async (req, res) => {
   }
 };
 
-// ---------------- Student: get my allocation (latest committed cycle) ----------------
-// Student: get my allocation (prefer latest committed cycle; fallback to any cycle)
+/* ---------------- Student: get my allocation (latest committed cycle) ---------------- */
 exports.myAllocationForStudent = async (req, res) => {
   try {
     const sid = req.user.user_id;
@@ -718,7 +791,7 @@ exports.myAllocationForStudent = async (req, res) => {
     );
 
     if (committed.length) {
-      res.set('Cache-Control', 'no-store');
+      setNoStore(res);
       return res.json(committed[0]);
     }
 
@@ -741,7 +814,7 @@ exports.myAllocationForStudent = async (req, res) => {
       [sid]
     );
 
-    res.set('Cache-Control', 'no-store');
+    setNoStore(res);
     return res.json(anyCycle.length ? anyCycle[0] : null);
   } catch (e) {
     console.error('myAllocationForStudent error:', e);

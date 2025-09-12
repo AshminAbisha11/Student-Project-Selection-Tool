@@ -161,7 +161,7 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: 'title and topic are required' });
     }
 
-    const activeId = await getActiveCycleId(); // may be null
+    const activeId = await getActiveCycleId(); 
 
     const [r] = await db.query(
       `
@@ -410,7 +410,6 @@ exports.decideProposal = async (req, res) => {
       return res.status(400).json({ message: 'Reason too long (max 1000 chars)' });
     }
 
-    // Load the proposal first
     const [[p]] = await db.query(
       `SELECT proposal_id, student_id, supervisor_id, project_id, cycle_id
          FROM proposals
@@ -419,7 +418,6 @@ exports.decideProposal = async (req, res) => {
     );
     if (!p) return res.status(404).json({ message: 'Proposal not found' });
 
-    // Only need transaction if accepting a student idea (project_id is NULL)
     if (normalized === 'accepted' && p.project_id == null) {
       conn = await db.getConnection();
       try {

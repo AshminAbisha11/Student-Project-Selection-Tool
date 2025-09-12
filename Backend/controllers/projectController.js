@@ -20,7 +20,6 @@ async function getMostRecentCycleId() {
   return r.length ? r[0].cycle_id : null;
 }
 
-// Strictly "open" by status (what students should use)
 async function getOpenCycleId() {
   const [r] = await db.query(`
     SELECT cycle_id
@@ -32,7 +31,6 @@ async function getOpenCycleId() {
   return r.length ? r[0].cycle_id : null;
 }
 
-// "Active" is a bit looser (status open or current datetime in window)
 async function getActiveCycleId() {
   const [byStatus] = await db.query(`
     SELECT cycle_id FROM allocation_cycles
@@ -53,7 +51,7 @@ async function getActiveCycleId() {
 
 async function resolveSupervisorCycleFilter(req) {
   const raw = (req.query.cycle ?? req.query.cycle_id ?? '').toString().trim().toLowerCase();
-  if (raw === 'all') return { cycleId: null, source: 'all' };      // no cycle filter
+  if (raw === 'all') return { cycleId: null, source: 'all' };      
   if (/^\d+$/.test(raw)) return { cycleId: Number(raw), source: 'request' };
 
   // default: prefer open; else most recent
@@ -104,7 +102,6 @@ const baseJoins = `
  * ====================================================== */
 exports.listForStudents = async (req, res) => {
   try {
-    // strict: only 'open' status counts
     const openCycleId = await getOpenCycleId();
     if (!openCycleId) {
       return res
@@ -120,7 +117,6 @@ exports.listForStudents = async (req, res) => {
       offset = '0',
     } = req.query;
 
-    // WHERE clauses & params
     const clauses = [
       'p.cycle_id = ?',
       'p.is_archived = 0',
@@ -431,8 +427,8 @@ exports.getMyProjects = async (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({
       meta: {
-        cycle_filter: cycleId,      // null means "all"
-        cycle_source: source,       // 'open' | 'recent' | 'request' | 'all'
+        cycle_filter: cycleId,      
+        cycle_source: source,       
         archived: archivedParam || '0',
         count: rows?.length || 0
       },
@@ -498,7 +494,7 @@ exports.updateMyProject = async (req, res) => {
     quota,
     full_description = null,
     prerequisites = null,
-    cycle_id: cycleIdFromBody = null, // allow overriding cycle
+    cycle_id: cycleIdFromBody = null, 
   } = req.body || {};
 
   const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -613,7 +609,7 @@ exports.createProject = async (req, res) => {
       quota,
       full_description = null,
       prerequisites = null,
-      cycle_id: cycleIdFromBody = null,     // optional
+      cycle_id: cycleIdFromBody = null,    
     } = req.body || {};
 
     const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -626,14 +622,12 @@ exports.createProject = async (req, res) => {
       return res.status(400).json({ message: 'Quota must be an integer ≥ 1.' });
     }
 
-    // Decide cycle_id for ALL projects (may be NULL if no open cycle)
     let cycleId = null;
     if (cycleIdFromBody !== null && String(cycleIdFromBody).trim() !== '') {
       const parsed = Number(cycleIdFromBody);
       if (Number.isInteger(parsed) && parsed > 0) cycleId = parsed;
     }
     if (!cycleId) {
-      // If there is an active cycle, attach to it; otherwise leave NULL (draft)
       try {
         const active = await getActiveCycleId();
         if (active) cycleId = active;
@@ -669,7 +663,7 @@ exports.createProject = async (req, res) => {
           q,
           supervisor_id,
           isStudentPool ? 1 : 0,
-          cycleId,                         // may be NULL (draft)
+          cycleId,                         
         ]
       );
 
@@ -705,7 +699,7 @@ exports.createProject = async (req, res) => {
       res.set('Cache-Control', 'no-store');
       return res.status(201).json({
         message: drafted
-          ? 'Project created as a draft (no active cycle). It will appear to students once a cycle is opened.'
+          ? 'Project created as a draft. It will appear to students once a allocation cycle is opened.'
           : 'Project created and attached to the active cycle.',
         project,
       });

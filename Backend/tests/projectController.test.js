@@ -86,17 +86,12 @@ describe('projectController.getAllProjects', () => {
     const req = mockReq();
     const res = mockRes();
 
-    db.query.mockResolvedValueOnce([[
-      { project_id: 1 },
-      { project_id: 2 },
-    ]]);
+    db.query.mockResolvedValueOnce([[{ project_id: 1 }, { project_id: 2 }]]);
 
     await projCtl.getAllProjects(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ count: 2 })
-    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ count: 2 }));
   });
 });
 
@@ -125,15 +120,11 @@ describe('projectController.getProjectDetails', () => {
     const req = mockReq({ params: { projectId: '10' } });
     const res = mockRes();
 
-    db.execute = jest.fn().mockResolvedValueOnce([[
-      { project_id: 10, title: 'X', full_description: 'desc' }
-    ]]);
+    db.execute = jest.fn().mockResolvedValueOnce([[{ project_id: 10, title: 'X', full_description: 'desc' }]]);
 
     await projCtl.getProjectDetails(req, res);
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 10, title: 'X' })
-    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ project_id: 10, title: 'X' }));
   });
 });
 
@@ -213,9 +204,9 @@ describe('projectController.getMyProjects', () => {
 
     // resolveSupervisorCycleFilter: open -> none -> recent -> {cycle_id: 9}
     db.query
-      .mockResolvedValueOnce([[]])           // open
+      .mockResolvedValueOnce([[]])                 // open
       .mockResolvedValueOnce([[{ cycle_id: 9 }]])  // recent
-      .mockResolvedValueOnce([[ // list
+      .mockResolvedValueOnce([[
         { project_id: 1, allocated_count: 0 },
         { project_id: 2, allocated_count: 3 },
       ]]);
@@ -232,14 +223,28 @@ describe('projectController.getMyProjects', () => {
     const req = mockReq({ user: { user_id: 77 }, query: { cycle: 'all' } });
     const res = mockRes();
 
-    // resolveSupervisorCycleFilter => {cycleId:null}
-    // so single db.query call to fetch rows
     db.query.mockResolvedValueOnce([[{ project_id: 3 }]]);
 
     await projCtl.getMyProjects(req, res);
 
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       meta: expect.objectContaining({ cycle_filter: null, cycle_source: 'all' }),
+    }));
+  });
+
+  // NEW: explicit numeric cycle
+  it('respects explicit numeric cycle filter (cycle=123)', async () => {
+    const req = mockReq({ user: { user_id: 77 }, query: { cycle: '123' } });
+    const res = mockRes();
+
+    // Only listing query (no open/recent lookups)
+    db.query.mockResolvedValueOnce([[{ project_id: 9, cycle_id: 123 }]]);
+
+    await projCtl.getMyProjects(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      meta: expect.objectContaining({ cycle_filter: 123, cycle_source: 'request' }),
+      projects: expect.any(Array),
     }));
   });
 });
@@ -316,6 +321,40 @@ describe('projectController.updateMyProject', () => {
     });
     await projCtl.updateMyProject(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  // NEW: Student Proposal Ideas without active cycle -> 409
+  it('409 when topic is Student Proposal Ideas and there is no active cycle', async () => {
+    const req = mockReq({
+      user: { user_id: 9 },
+      params: { projectId: '7' },
+      body: { title: 'T', description: 'D', quota: 2, topic: 'Student Proposal Ideas' },
+    });
+    const res = mockRes();
+
+    const conn = {
+      beginTransaction: jest.fn(),
+      query: jest.fn()
+        // ownership ok (existing project)
+        .mockResolvedValueOnce([[{ project_id: 7, cycle_id: 4 }]]),
+      commit: jest.fn(),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    db.getConnection = jest.fn().mockResolvedValue(conn);
+
+    // getActiveCycleId() -> byStatus [], byDate []
+    db.query
+      .mockResolvedValueOnce([[]]) // status='open'
+      .mockResolvedValueOnce([[]]); // by date window
+
+    await projCtl.updateMyProject(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'No active allocation cycle.' })
+    );
+    expect(conn.rollback).toHaveBeenCalled();
   });
 
   it('404 when not owned; else updates & returns project', async () => {

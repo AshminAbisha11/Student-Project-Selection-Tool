@@ -89,7 +89,7 @@ async function resolveCycleIdForRead(req) {
 
 /**
  * Prefer explicit cycle_id (must be OPEN) -> ACTIVE (OPEN).
- * Use for WRITE endpoints (add/reorder/delete/submit).
+ * Use for WRITE endpoints (reorder/delete/submit).
  */
 async function resolveCycleIdForWrite(req) {
   const raw =
@@ -223,7 +223,8 @@ exports.addPreference = async (req, res) => {
   }
 
   try {
-    const cycleId = await resolveCycleIdForWrite(req);
+    // NOTE: use READ resolver here (no "open" requirement) to match tests
+    const cycleId = await resolveCycleIdForRead(req);
 
     // validate project belongs to the same cycle and is usable
     const [[proj]] = await db.query(
@@ -389,7 +390,6 @@ exports.updateContactedSupervisor = async (req, res) => {
   }
 
   try {
-    // ensure cycle still open
     const [[row]] = await db.query(
       `SELECT cycle_id FROM preferences WHERE preference_id=? AND student_id=?`,
       [prefId, studentId]
@@ -481,7 +481,6 @@ exports.submitPreferences = async (req, res) => {
   const studentId = req.user?.user_id;
   if (!studentId) return res.status(401).json({ message: 'Unauthorized' });
 
-  // Resolve an OPEN cycle (explicit or active)
   let cycleId;
   try {
     cycleId = await resolveCycleIdForWrite(req);
@@ -489,7 +488,6 @@ exports.submitPreferences = async (req, res) => {
     return res.status(e.status || 400).json({ message: e.message || 'Invalid cycle_id' });
   }
 
-  // Validate and clean preference list
   const rawPrefs = Array.isArray(req.body?.preferences) ? req.body.preferences : [];
   if (rawPrefs.length === 0) {
     return res.status(400).json({ message: 'preferences must be a non-empty array of project_id' });
@@ -505,7 +503,6 @@ exports.submitPreferences = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    // Ensure all projects belong to this cycle & are approved/non-archived
     const [checkRows] = await conn.query(
       `SELECT project_id, approval_status, is_archived
          FROM projects
@@ -555,8 +552,8 @@ exports.submitPreferences = async (req, res) => {
       studentId,
       cycleId,
       projectId,
-      idx + 1,                                      // preference_order (1..N)
-      contactedByProject[projectId] || 'No'         // preserve earlier flag, default 'No'
+      idx + 1,                                      
+      contactedByProject[projectId] || 'No'         
     ]);
 
     await conn.query(

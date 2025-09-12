@@ -34,14 +34,11 @@ const reportRoutes = require("./routes/reportRoutes");
 
 const app = express();
 
-/* ---------------------------
-   CORS (explicit origin + creds)
-   --------------------------- */
+
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 
 const corsOptions = {
   origin: (origin, cb) => {
-    // allow Postman/curl (no origin) and your SPA origin
     if (!origin || origin === CLIENT_ORIGIN) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
@@ -50,20 +47,11 @@ const corsOptions = {
   credentials: true,
 };
 
-app.use(cors(corsOptions)); // this already handles preflights
-
-// If you want to be extra explicit without using '*', you can use a regex:
-// app.options(/^\/.*/i, cors(corsOptions));
-
-/* ---------------------------
-   Body & static
-   --------------------------- */
+app.use(cors(corsOptions)); 
 app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-/* ---------------------------
-   Simple health & auth helpers
-   --------------------------- */
+
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 app.get('/auth/me', verifyToken, (req, res) => {

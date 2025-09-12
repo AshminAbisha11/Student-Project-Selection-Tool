@@ -1,7 +1,6 @@
 /* =========================================================
-   Supervisor – My Projects (SCOPED, final-final)
-   Fills full width beside the fixed sidebar, regardless of
-   any global .container max-width rules.
+   Supervisor – My Projects (SCOPED)
+   Full-width grid beside fixed sidebar + polished modal
    ========================================================= */
 .sv-layout{
   /* Brand + color tokens */
@@ -40,6 +39,7 @@
   padding: var(--header-h) var(--gutter) 0 var(--gutter);
   min-height: calc(100vh - var(--header-h));
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 /* Panel fills the row; no auto-centering */
@@ -64,7 +64,8 @@
   border: 1px solid var(--stroke);
   border-radius: 16px;
   box-shadow: 0 10px 24px rgba(32, 4, 80, .10);
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 @supports not (backdrop-filter: blur(6px)){
   .sv-layout .myproj-controls{ background:#fff; }
@@ -115,7 +116,7 @@
   justify-items: stretch;
 }
 
-/* Ensure cards never cap themselves */
+/* Cards */
 .sv-layout .project-card{
   min-width: 0; width: auto; max-width: none;
   position:relative; display:flex; flex-direction:column; overflow:hidden;
@@ -130,7 +131,7 @@
   background:linear-gradient(90deg,var(--brand),var(--brand-2)); opacity:.65;
 }
 
-/* ...chips, text, meta, capacity, footer (unchanged)... */
+/* Chips & text */
 .sv-layout .project-card__top{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .sv-layout .chip{ font-size:12.5px; font-weight:800; padding:4px 10px; border-radius:999px; border:1px solid #ede8ff; color:#5a2f90; background:#f6f0ff; }
 .sv-layout .chip--approved{ background:#eaf8f0; border-color:#cfeedd; color:#1a5c2b; }
@@ -141,37 +142,38 @@
 .sv-layout .project-desc{ margin:0 0 12px; color:#4d4759; line-height:1.5; }
 .sv-layout .meta-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
 .sv-layout .meta-pill{ padding:5px 10px; border-radius:999px; font-size:12px; font-weight:700; color:#4a3f64; background:#f2efff; border:1px solid #e7e3ff; }
+
+/* Capacity & footer */
 .sv-layout .capacity-row{ margin-top:6px; padding-top:12px; border-top:1px dashed #eee; display:flex; justify-content:space-between; align-items:center; }
 .sv-layout .quota-badge{ background:#e9f7ef; color:#1e4620; border:1px solid #b7e0c7; font-size:12px; padding:6px 12px; border-radius:999px; font-weight:800; }
 .sv-layout .quota-badge.full{ background:#fdecea; color:#611a15; border:1px solid #f5c6cb; }
 .sv-layout .numbers{ display:flex; align-items:center; gap:12px; }
 .sv-layout .numbers span{ font-size:13.5px; color:#333; white-space:nowrap; }
 .sv-layout .numbers span + span{ padding-left:12px; border-left:1px solid #eee; }
+
 .sv-layout .footer-row{
-  /* switch to 2-column layout: dates on the left, actions on the right */
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 10px;
-}.sv-layout .dates{ color:#7a7390; font-size:12px; line-height:1.35; max-width:62%; }
+}
+.sv-layout .dates{ color:#7a7390; font-size:12px; line-height:1.35; max-width:62%; }
 
 .sv-layout .card-actions{
-  display: flex !important;          /* force row layout */
+  display: flex !important;
   flex-direction: row !important;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  white-space: nowrap;                /* prevent wrapping */
+  white-space: nowrap;
 }
-
 .sv-layout .card-actions .btn{
-  flex: 0 0 auto;                     /* don’t stretch */
+  flex: 0 0 auto;
   height: 34px;
   padding: 0 12px;
   line-height: 34px;
   border-radius: 999px;
 }
-
 
 /* Phones */
 @media (max-width:760px){
@@ -183,5 +185,95 @@
 @media (prefers-reduced-motion: reduce){
   .sv-layout .btn,
   .sv-layout .project-card,
-  .sv-layout .seg-btn{ transition:none !important; }
+  .sv-layout .seg-btn,
+  .sv-modal-backdrop,
+  .sv-modal{ transition:none !important; animation:none !important; }
+}
+
+/* =========================================================
+   MODAL (Confirm dialog) – portal-rendered
+   ========================================================= */
+.sv-modal-backdrop{
+  position: fixed;
+  inset: 0;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,.55);
+  z-index: 9999;
+
+  /* subtle entrance */
+  animation: sv-fade .12s ease-out;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.sv-modal{
+  width: min(520px, 92vw);
+  max-height: 85vh;               /* safe on short viewports */
+  overflow: auto;                  /* scroll inside if content grows */
+  background: #0f0f13;
+  color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  padding: 20px;
+  outline: none;
+
+  animation: sv-pop .16s ease-out;
+}
+
+.sv-modal h3{
+  margin: 4px 0 10px;
+  font-size: 18px;
+}
+.sv-modal p{
+  line-height: 1.6;
+  color: #d7d7e0;
+  margin: 0;
+}
+.sv-modal-actions{
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* Buttons used inside the modal */
+.sv-btn{
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+}
+.sv-btn:disabled{
+  opacity: .7;
+  cursor: default;
+}
+.sv-btn--ghost{
+  background: transparent;
+  border-color: #6a6a7b;
+  color: #cfd0ff;
+}
+.sv-btn--ghost:focus-visible{
+  outline: 2px solid #6a6a7b;
+  outline-offset: 2px;
+}
+.sv-btn--danger{
+  background: #e23b3b;
+  color: #fff;
+}
+.sv-btn--danger:focus-visible{
+  outline: 2px solid rgba(226,58,58,.6);
+  outline-offset: 2px;
+}
+
+/* Animations */
+@keyframes sv-fade{
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes sv-pop{
+  from { transform: scale(.96); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
 }

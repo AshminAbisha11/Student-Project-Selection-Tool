@@ -1,6 +1,6 @@
 /**
  * Tests for controllers/preferenceController.js
- * - Mocks the exact db module id as resolved from controllers/
+ * - Path-accurate db mock so the controller never hits a real DB
  * - Covers: auth guards, resolveCycleId, list/status/add/update/reorder/contact/delete/submit
  */
 
@@ -32,8 +32,8 @@ beforeEach(() => {
     prefCtl = require('../controllers/preferenceController');
     db = require('./mocks/db.mock').db;
 
-    db.query.mockReset();
-    if (db.getConnection?.mockReset) db.getConnection.mockReset();
+    db.query.mockReset?.();
+    db.getConnection?.mockReset?.();
   });
 });
 
@@ -119,10 +119,10 @@ describe('getSubmissionStatus', () => {
     const req = mockReq({ user: { user_id: 9 }, query: {} });
     const res = mockRes();
 
-    // resolveCycleId -> getActiveCycleId: byStatus -> empty; byDate -> finds 3
+    // resolveCycleIdForRead: getActiveCycleId (status -> none; byDate -> 3)
     db.query
-      .mockResolvedValueOnce([[]])            // byStatus
-      .mockResolvedValueOnce([[{ cycle_id: 3 }]]) // byDate
+      .mockResolvedValueOnce([[]])                 // byStatus
+      .mockResolvedValueOnce([[{ cycle_id: 3 }]])  // byDate
       .mockResolvedValueOnce([[{ submitted_at: null }]]); // submission status
 
     await prefCtl.getSubmissionStatus(req, res);
@@ -138,6 +138,9 @@ describe('addPreference', () => {
     const res = mockRes();
     await prefCtl.addPreference(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'valid project_id is required'
+    }));
   });
 
   it('404 when project not found', async () => {
@@ -146,7 +149,7 @@ describe('addPreference', () => {
 
     db.query
       .mockResolvedValueOnce([[{ '1': 1 }]]) // cycleExists
-      .mockResolvedValueOnce([[/* proj not found */]]); // select project
+      .mockResolvedValueOnce([[]]);          // select project -> none
 
     await prefCtl.addPreference(req, res);
     expect(res.status).toHaveBeenCalledWith(404);
@@ -220,30 +223,40 @@ describe('updatePreferenceOrder', () => {
     const res = mockRes();
     await prefCtl.updatePreferenceOrder(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'valid preference_id and preference_order are required'
+    }));
   });
 
-  it('reorders inside a transaction and commits', async () => {
+  it('reorders inside a transaction and commits (cycle still open)', async () => {
     const req = mockReq({ user: { user_id: 9 }, body: { preference_id: 20, preference_order: 1 } });
     const res = mockRes();
 
     const conn = {
       beginTransaction: jest.fn().mockResolvedValue(undefined),
       query: jest.fn()
-        // select row+cycle
+        // select row+cycle (conn)
         .mockResolvedValueOnce([[{ cycle_id: 3 }]])
-        // select all in cycle
+        // pull all prefs in this cycle (conn)
         .mockResolvedValueOnce([[{ preference_id: 20 }, { preference_id: 21 }]])
-        // bump +100
+        // bump +100 (conn)
         .mockResolvedValueOnce([{ affectedRows: 2 }])
-        // set order pref 20 -> 1
+        // write order for id 20 -> 1 (conn)
         .mockResolvedValueOnce([{ affectedRows: 1 }])
-        // set order pref 21 -> 2
+        // write order for id 21 -> 2 (conn)
         .mockResolvedValueOnce([{ affectedRows: 1 }]),
       commit: jest.fn().mockResolvedValue(undefined),
       rollback: jest.fn().mockResolvedValue(undefined),
       release: jest.fn()
     };
     db.getConnection = jest.fn().mockResolvedValue(conn);
+
+    // getCycleRow (db) — return an OPEN cycle with a close in the future
+    db.query.mockResolvedValueOnce([[{
+      cycle_id: 3,
+      status: 'open',
+      submission_close_at: new Date(Date.now() + 3600_000).toISOString()
+    }]]);
 
     await prefCtl.updatePreferenceOrder(req, res);
 
@@ -262,23 +275,37 @@ describe('updateContactedSupervisor', () => {
     const res = mockRes();
     await prefCtl.updateContactedSupervisor(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: "contacted_supervisor must be 'Yes' or 'No'"
+    }));
   });
 
   it('404 when preference not found', async () => {
     const req = mockReq({ user: { user_id: 1 }, body: { preference_id: 9, contacted_supervisor: 'Yes' } });
     const res = mockRes();
 
-    db.query.mockResolvedValueOnce([{ affectedRows: 0 }]);
+    // First query (db) is SELECT cycle_id FROM preferences ... (controller does this before update)
+    db.query.mockResolvedValueOnce([[]]);
 
     await prefCtl.updateContactedSupervisor(req, res);
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
-  it('updates contacted_supervisor', async () => {
+  it('updates contacted_supervisor when cycle is open', async () => {
     const req = mockReq({ user: { user_id: 1 }, body: { preference_id: 9, contacted_supervisor: 'No' } });
     const res = mockRes();
 
-    db.query.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    // 1) SELECT cycle_id FROM preferences ...
+    db.query
+      .mockResolvedValueOnce([[{ cycle_id: 5 }]])
+      // 2) getCycleRow -> open & not past close
+      .mockResolvedValueOnce([[{
+        cycle_id: 5,
+        status: 'open',
+        submission_close_at: new Date(Date.now() + 3600_000).toISOString()
+      }]])
+      // 3) UPDATE preferences ...
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     await prefCtl.updateContactedSupervisor(req, res);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
@@ -303,9 +330,8 @@ describe('deletePreference', () => {
     const conn = {
       beginTransaction: jest.fn().mockResolvedValue(undefined),
       query: jest.fn()
-        // select cycle
-        .mockResolvedValueOnce([[/* none */]])
-      ,
+        // select cycle (conn) -> none
+        .mockResolvedValueOnce([[]]),
       commit: jest.fn(),
       rollback: jest.fn().mockResolvedValue(undefined),
       release: jest.fn()
@@ -317,24 +343,31 @@ describe('deletePreference', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 
-  it('deletes and repacks orders then commits', async () => {
+  it('deletes and repacks orders then commits (cycle open)', async () => {
     const req = mockReq({ user: { user_id: 1 }, params: { preferenceId: '5' } });
     const res = mockRes();
 
     const conn = {
       beginTransaction: jest.fn().mockResolvedValue(undefined),
       query: jest.fn()
-        // select cycle
+        // select cycle (conn)
         .mockResolvedValueOnce([[{ cycle_id: 3 }]])
-        // delete row
+        // delete row (conn)
         .mockResolvedValueOnce([{ affectedRows: 1 }])
-        // repackOrders: select remaining (empty is fine)
+        // repackOrders: select remaining (conn)
         .mockResolvedValueOnce([[]]),
       commit: jest.fn().mockResolvedValue(undefined),
       rollback: jest.fn().mockResolvedValue(undefined),
       release: jest.fn()
     };
     db.getConnection = jest.fn().mockResolvedValue(conn);
+
+    // getCycleRow (db) — open & not past close
+    db.query.mockResolvedValueOnce([[{
+      cycle_id: 3,
+      status: 'open',
+      submission_close_at: new Date(Date.now() + 3600_000).toISOString()
+    }]]);
 
     await prefCtl.deletePreference(req, res);
 
@@ -352,13 +385,16 @@ describe('submitPreferences', () => {
     const req = mockReq({ user: { user_id: 7 }, body: { preferences: [] }, query: { cycle_id: '4' } });
     const res = mockRes();
 
-    // resolveCycleId -> cycleExists
-    db.query.mockResolvedValueOnce([[{ '1': 1 }]]);
+    // resolveCycleIdForWrite -> cycleExists + getCycleRow (open)
+    db.query
+      .mockResolvedValueOnce([[{ '1': 1 }]]) // cycleExists
+      .mockResolvedValueOnce([[{ cycle_id: 4, status: 'open', submission_close_at: new Date(Date.now() + 3600_000).toISOString() }]]);
+
     await prefCtl.submitPreferences(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  it('saves snapshot idempotently, preserves contacted flags, inserts up to 5', async () => {
+  it('saves snapshot idempotently, validates projects, preserves flags, inserts up to 5', async () => {
     const req = mockReq({
       user: { user_id: 7 },
       query: { cycle_id: '4' },
@@ -366,19 +402,29 @@ describe('submitPreferences', () => {
     });
     const res = mockRes();
 
-    // resolveCycleId -> cycleExists
-    db.query.mockResolvedValueOnce([[{ '1': 1 }]]);
+    // resolveCycleIdForWrite -> cycleExists + getCycleRow (open)
+    db.query
+      .mockResolvedValueOnce([[{ '1': 1 }]]) // cycleExists
+      .mockResolvedValueOnce([[{ cycle_id: 4, status: 'open', submission_close_at: new Date(Date.now() + 3600_000).toISOString() }]]);
 
     const conn = {
       beginTransaction: jest.fn().mockResolvedValue(undefined),
       query: jest.fn()
+        // Ensure all projects belong to cycle & are approved/non-archived
+        .mockResolvedValueOnce([[
+          { project_id: 100, approval_status: 'approved', is_archived: 0 },
+          { project_id: 101, approval_status: 'approved', is_archived: 0 },
+          { project_id: 102, approval_status: 'approved', is_archived: 0 },
+          { project_id: 103, approval_status: 'approved', is_archived: 0 },
+          { project_id: 104, approval_status: 'approved', is_archived: 0 },
+        ]])
         // 1) upsert submission
         .mockResolvedValueOnce([{ affectedRows: 1 }])
         // 2) select existing preferences (with contacted)
         .mockResolvedValueOnce([[{ project_id: 101, contacted_supervisor: 'Yes' }]])
         // 3) delete old
         .mockResolvedValueOnce([{ affectedRows: 3 }])
-        // 4) bulk insert
+        // 4) bulk insert (5 rows)
         .mockResolvedValueOnce([{ affectedRows: 5 }]),
       commit: jest.fn().mockResolvedValue(undefined),
       rollback: jest.fn().mockResolvedValue(undefined),
@@ -389,7 +435,7 @@ describe('submitPreferences', () => {
     await prefCtl.submitPreferences(req, res);
 
     // deduped & capped to 5 -> [100,101,102,103,104]
-    expect(conn.query).toHaveBeenCalledTimes(4);
+    expect(conn.query).toHaveBeenCalledTimes(5);
     expect(res.json).toHaveBeenCalledWith({ ok: true, cycle_id: 4, saved: 5 });
     expect(conn.commit).toHaveBeenCalled();
   });
@@ -402,17 +448,25 @@ describe('submitPreferences', () => {
     });
     const res = mockRes();
 
-    // resolveCycleId -> cycleExists
-    db.query.mockResolvedValueOnce([[{ '1': 1 }]]);
+    // resolveCycleIdForWrite -> cycleExists + getCycleRow (open)
+    db.query
+      .mockResolvedValueOnce([[{ '1': 1 }]]) // cycleExists
+      .mockResolvedValueOnce([[{ cycle_id: 4, status: 'open', submission_close_at: new Date(Date.now() + 3600_000).toISOString() }]]);
 
     const fkErr = Object.assign(new Error('fk'), { code: 'ER_NO_REFERENCED_ROW_2', sqlMessage: 'FK fail' });
     const conn = {
       beginTransaction: jest.fn().mockResolvedValue(undefined),
       query: jest.fn()
-        .mockResolvedValueOnce([{ affectedRows: 1 }])   // upsert
-        .mockResolvedValueOnce([[/* existing flags */]])// select existing
-        .mockResolvedValueOnce([{ affectedRows: 0 }])   // delete old
-        .mockRejectedValueOnce(fkErr),                  // bulk insert -> FK error
+        // Ensure all projects belong (simulate OK so it reaches insert)
+        .mockResolvedValueOnce([[{ project_id: 999, approval_status: 'approved', is_archived: 0 }]])
+        // upsert submission
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        // select existing flags
+        .mockResolvedValueOnce([[]])
+        // delete old
+        .mockResolvedValueOnce([{ affectedRows: 0 }])
+        // bulk insert -> FK error
+        .mockRejectedValueOnce(fkErr),
       commit: jest.fn(),
       rollback: jest.fn().mockResolvedValue(undefined),
       release: jest.fn()
